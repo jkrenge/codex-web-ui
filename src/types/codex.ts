@@ -4,6 +4,7 @@ export type RpcEnvelope<T> = {
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type SpeedMode = 'standard' | 'fast'
+export type KanbanStatus = 'backlog' | 'in_progress' | 'review' | 'closed_followup' | 'archived'
 
 export type RpcMethodCatalog = {
   data: string[]
@@ -70,6 +71,8 @@ export type UiThread = {
   preview: string
   unread: boolean
   inProgress: boolean
+  kanbanStatus: KanbanStatus
+  kanbanPosition: number
 }
 
 export type CommandExecutionData = {

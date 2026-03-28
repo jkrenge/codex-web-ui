@@ -61,6 +61,7 @@
             :search-matched-thread-ids="serverMatchedThreadIds"
             @select="onSelectThread"
             @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
+            @set-kanban-status="onSetThreadKanbanStatus"
             @browse-thread-files="onBrowseThreadFiles"
             @rename-thread="onRenameThread"
             @fork-thread="onForkThread"
@@ -317,7 +318,7 @@ import {
   openProjectRoot,
   searchThreads,
 } from './api/codexGateway'
-import type { ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
+import type { KanbanStatus, ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { GithubTipsScope, GithubTrendingProject, TelegramStatus } from './api/codexGateway'
 import { getPathLeafName, getPathParent } from './pathUtils.js'
@@ -463,6 +464,7 @@ const {
   selectThread,
   setThreadScrollState,
   archiveThreadById,
+  setThreadKanbanStatusById,
   forkThreadById,
   renameThreadById,
   sendMessageToSelectedThread,
@@ -754,6 +756,10 @@ async function onExportThread(threadId: string): Promise<void> {
 
 function onArchiveThread(threadId: string): void {
   void archiveThreadById(threadId)
+}
+
+function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus }): void {
+  void setThreadKanbanStatusById(payload.threadId, payload.status)
 }
 
 async function onForkThread(threadId: string): Promise<void> {

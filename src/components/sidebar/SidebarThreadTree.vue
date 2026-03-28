@@ -1,6 +1,6 @@
 <template>
   <section class="thread-tree-root">
-    <section v-if="pinnedThreads.length > 0" class="pinned-section">
+    <section v-if="pinnedThreads.length > 0 && !isKanbanView" class="pinned-section">
       <ul class="thread-list">
         <li v-for="thread in pinnedThreads" :key="thread.id" class="thread-row-item">
           <SidebarMenuRow
@@ -97,6 +97,15 @@
               <span>Chronological list</span>
               <span v-if="threadViewMode === 'chronological'">✓</span>
             </button>
+            <button
+              class="organize-menu-item"
+              :data-active="threadViewMode === 'kanban'"
+              type="button"
+              @click="setThreadViewMode('kanban')"
+            >
+              <span>Kanban board</span>
+              <span v-if="threadViewMode === 'kanban'">✓</span>
+            </button>
           </div>
         </div>
       </template>
@@ -105,6 +114,98 @@
     <p v-if="isSearchActive && filteredGroups.length === 0" class="thread-tree-no-results">No matching threads</p>
 
     <p v-else-if="isLoading && groups.length === 0" class="thread-tree-loading">Loading threads...</p>
+
+    <section v-else-if="isKanbanView" class="kanban-board">
+      <article v-for="lane in kanbanLanes" :key="lane.status" class="kanban-lane">
+        <SidebarMenuRow as="header" class="kanban-lane-header-row">
+          <span class="kanban-lane-title">{{ lane.label }}</span>
+          <template #right>
+            <span class="kanban-lane-count">{{ lane.threads.length }}</span>
+          </template>
+        </SidebarMenuRow>
+
+        <ul v-if="lane.threads.length > 0" class="thread-list kanban-lane-list">
+          <li v-for="thread in lane.threads" :key="thread.id" class="thread-row-item">
+            <SidebarMenuRow
+              class="thread-row kanban-thread-row"
+              :data-active="thread.id === selectedThreadId"
+              :force-right-hover="isThreadMenuOpen(thread.id)"
+              @mouseleave="onThreadRowLeave(thread.id)"
+              @contextmenu="onThreadRowContextMenu($event, thread.id)"
+            >
+              <template #left>
+                <span class="thread-left-stack">
+                  <span
+                    v-if="thread.inProgress || thread.unread"
+                    class="thread-status-indicator"
+                    :data-state="getThreadState(thread)"
+                  />
+                </span>
+              </template>
+              <button class="thread-main-button kanban-thread-main-button" type="button" @click="onSelect(thread.id)">
+                <span class="thread-row-title-wrap kanban-thread-title-wrap">
+                  <span class="thread-row-title">{{ thread.title }}</span>
+                  <IconTablerGitFork v-if="thread.hasWorktree" class="thread-row-worktree-icon" title="Worktree thread" />
+                </span>
+                <span class="kanban-thread-project">{{ getProjectDisplayName(thread.projectName) }}</span>
+              </button>
+              <template #right>
+                <span class="thread-row-time">{{ formatRelativeThread(thread) }}</span>
+              </template>
+              <template #right-hover>
+                <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
+                  <button
+                    class="thread-menu-trigger"
+                    type="button"
+                    title="thread_menu"
+                    @click.stop="toggleThreadMenu(thread.id)"
+                  >
+                    <IconTablerDots class="thread-icon" />
+                  </button>
+                  <div v-if="isThreadMenuOpen(thread.id)" class="thread-menu-panel" @click.stop>
+                    <button class="thread-menu-item" type="button" @click="onBrowseThreadFiles(thread.id)">
+                      Browse files
+                    </button>
+                    <button class="thread-menu-item" type="button" @click="onExportThread(thread.id)">
+                      Export chat
+                    </button>
+                    <button class="thread-menu-item" type="button" @click="onForkThread(thread.id)">
+                      Create chat fork
+                    </button>
+                    <button class="thread-menu-item" type="button" @click="openRenameThreadDialog(thread.id, thread.title)">
+                      Rename thread
+                    </button>
+                    <div class="thread-menu-divider" />
+                    <button
+                      v-for="statusOption in KANBAN_MENU_STATUSES"
+                      :key="`${thread.id}-${statusOption}`"
+                      class="thread-menu-item"
+                      :class="{ 'thread-menu-item-active': thread.kanbanStatus === statusOption }"
+                      type="button"
+                      :disabled="thread.kanbanStatus === statusOption"
+                      @click="moveThreadToKanbanStatus(thread.id, statusOption)"
+                    >
+                      {{ thread.kanbanStatus === statusOption ? `Current: ${getKanbanStatusLabel(statusOption)}` : `Move to ${getKanbanStatusLabel(statusOption)}` }}
+                    </button>
+                    <div class="thread-menu-divider" />
+                    <button class="thread-menu-item thread-menu-item-danger" type="button" @click="openDeleteThreadDialog(thread.id, thread.title)">
+                      Delete thread
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </SidebarMenuRow>
+          </li>
+        </ul>
+
+        <SidebarMenuRow v-else as="p" class="project-empty-row">
+          <template #left>
+            <span class="project-empty-spacer" />
+          </template>
+          <span class="project-empty">{{ lane.emptyLabel }}</span>
+        </SidebarMenuRow>
+      </article>
+    </section>
 
     <ul v-else-if="isChronologicalView" class="thread-list thread-list-global">
       <li v-for="thread in globalThreads" :key="thread.id" class="thread-row-item">
@@ -384,7 +485,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import type { UiProjectGroup, UiThread } from '../../types/codex'
+import type { KanbanStatus, UiProjectGroup, UiThread } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
 import IconTablerChevronRight from '../icons/IconTablerChevronRight.vue'
 import IconTablerDots from '../icons/IconTablerDots.vue'
@@ -407,6 +508,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [threadId: string]
   archive: [threadId: string]
+  'set-kanban-status': [payload: { threadId: string; status: KanbanStatus }]
   'start-new-thread': [projectName: string]
   'browse-thread-files': [threadId: string]
   'rename-project': [payload: { projectName: string; displayName: string }]
@@ -446,6 +548,12 @@ type DragPointerSample = {
   clientY: number
 }
 
+type KanbanLaneDefinition = {
+  status: Exclude<KanbanStatus, 'archived'>
+  label: string
+  emptyLabel: string
+}
+
 const DRAG_START_THRESHOLD_PX = 4
 const PROJECT_GROUP_EXPANDED_GAP_PX = 6
 const expandedProjects = ref<Record<string, boolean>>({})
@@ -476,7 +584,14 @@ const projectNameByElement = new WeakMap<HTMLElement, string>()
 const organizeMenuWrapRef = ref<HTMLElement | null>(null)
 const isOrganizeMenuOpen = ref(false)
 const THREAD_VIEW_MODE_STORAGE_KEY = 'codex-web-local.thread-view-mode.v1'
-const threadViewMode = ref<'project' | 'chronological'>(loadThreadViewMode())
+const threadViewMode = ref<'project' | 'chronological' | 'kanban'>(loadThreadViewMode())
+const KANBAN_LANES: KanbanLaneDefinition[] = [
+  { status: 'backlog', label: 'Backlog', emptyLabel: 'No planned threads' },
+  { status: 'in_progress', label: 'In progress', emptyLabel: 'Nothing running' },
+  { status: 'review', label: 'Review', emptyLabel: 'Nothing waiting on review' },
+  { status: 'closed_followup', label: 'Closed / followup', emptyLabel: 'No follow-up items' },
+]
+const KANBAN_MENU_STATUSES: KanbanStatus[] = [...KANBAN_LANES.map((lane) => lane.status), 'archived']
 const projectGroupResizeObserver =
   typeof window !== 'undefined'
     ? new ResizeObserver((entries) => {
@@ -504,11 +619,12 @@ function loadCollapsedState(): Record<string, boolean> {
   }
 }
 
-function loadThreadViewMode(): 'project' | 'chronological' {
+function loadThreadViewMode(): 'project' | 'chronological' | 'kanban' {
   if (typeof window === 'undefined') return 'project'
 
   const raw = window.localStorage.getItem(THREAD_VIEW_MODE_STORAGE_KEY)
-  return raw === 'chronological' ? 'chronological' : 'project'
+  if (raw === 'chronological' || raw === 'kanban') return raw
+  return 'project'
 }
 
 collapsedProjects.value = loadCollapsedState()
@@ -556,6 +672,7 @@ const filteredGroups = computed<UiProjectGroup[]>(() => {
 })
 
 const isChronologicalView = computed(() => threadViewMode.value === 'chronological')
+const isKanbanView = computed(() => threadViewMode.value === 'kanban')
 
 const globalThreads = computed<UiThread[]>(() => {
   const sourceGroups = filteredGroups.value
@@ -619,6 +736,28 @@ const pinnedThreads = computed(() =>
     .map((threadId) => threadById.value.get(threadId) ?? null)
     .filter((thread): thread is UiThread => thread !== null)
     .filter(threadMatchesSearch),
+)
+
+const kanbanThreads = computed<UiThread[]>(() => {
+  const rows: UiThread[] = []
+  for (const group of filteredGroups.value) {
+    rows.push(...group.threads)
+  }
+  return rows.sort((first, second) => {
+    if (first.kanbanPosition !== second.kanbanPosition) {
+      return second.kanbanPosition - first.kanbanPosition
+    }
+    const firstTimestamp = new Date(first.updatedAtIso || first.createdAtIso).getTime()
+    const secondTimestamp = new Date(second.updatedAtIso || second.createdAtIso).getTime()
+    return secondTimestamp - firstTimestamp
+  })
+})
+
+const kanbanLanes = computed(() =>
+  KANBAN_LANES.map((lane) => ({
+    ...lane,
+    threads: kanbanThreads.value.filter((thread) => thread.kanbanStatus === lane.status),
+  })),
 )
 
 const projectedDropProjectIndex = computed<number | null>(() => {
@@ -828,9 +967,22 @@ function toggleOrganizeMenu(): void {
   isOrganizeMenuOpen.value = !isOrganizeMenuOpen.value
 }
 
-function setThreadViewMode(mode: 'project' | 'chronological'): void {
+function setThreadViewMode(mode: 'project' | 'chronological' | 'kanban'): void {
   threadViewMode.value = mode
   isOrganizeMenuOpen.value = false
+}
+
+function getKanbanStatusLabel(status: KanbanStatus): string {
+  if (status === 'in_progress') return 'In progress'
+  if (status === 'closed_followup') return 'Closed / followup'
+  if (status === 'archived') return 'Archive'
+  if (status === 'review') return 'Review'
+  return 'Backlog'
+}
+
+function moveThreadToKanbanStatus(threadId: string, status: KanbanStatus): void {
+  emit('set-kanban-status', { threadId, status })
+  closeThreadMenu()
 }
 
 function toggleProjectMenu(projectName: string): void {
@@ -1345,7 +1497,9 @@ watch(
   },
 )
 
-const hasOpenDismissableMenu = computed(() => isOrganizeMenuOpen.value || openProjectMenuId.value !== '')
+const hasOpenDismissableMenu = computed(() =>
+  isOrganizeMenuOpen.value || openProjectMenuId.value !== '' || openThreadMenuId.value !== '',
+)
 
 watch(hasOpenDismissableMenu, (isOpen) => {
   if (isOpen) {
@@ -1420,6 +1574,46 @@ onBeforeUnmount(() => {
 
 .thread-tree-no-results {
   @apply px-3 py-2 text-sm text-zinc-400;
+}
+
+.kanban-board {
+  @apply flex flex-col gap-3 pr-0.5;
+}
+
+.kanban-lane {
+  @apply flex flex-col gap-1;
+}
+
+.kanban-lane-header-row {
+  @apply cursor-default rounded-xl bg-zinc-100/80 px-3 py-2;
+}
+
+.kanban-lane-title {
+  @apply text-sm font-medium text-zinc-700;
+}
+
+.kanban-lane-count {
+  @apply inline-flex min-w-5 items-center justify-center rounded-full bg-white px-1.5 py-0.5 text-xs text-zinc-500;
+}
+
+.kanban-lane-list {
+  @apply gap-1;
+}
+
+.kanban-thread-row {
+  @apply rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white;
+}
+
+.kanban-thread-main-button {
+  @apply flex flex-col items-start gap-0.5;
+}
+
+.kanban-thread-title-wrap {
+  @apply w-full;
+}
+
+.kanban-thread-project {
+  @apply text-xs text-zinc-500 truncate;
 }
 
 .thread-tree-groups {
@@ -1572,6 +1766,18 @@ onBeforeUnmount(() => {
 
 .thread-menu-item {
   @apply rounded px-2 py-1 text-left text-sm text-zinc-700 hover:bg-zinc-100;
+}
+
+.thread-menu-item-active {
+  @apply bg-zinc-100 text-zinc-900;
+}
+
+.thread-menu-item:disabled {
+  @apply cursor-default;
+}
+
+.thread-menu-divider {
+  @apply my-1 h-px bg-zinc-200;
 }
 
 .thread-menu-item-danger {

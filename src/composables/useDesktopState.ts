@@ -4,6 +4,7 @@ import {
   archiveThread,
   forkThread,
   getAccountRateLimits,
+  getKanbanBoardState,
   renameThread,
   getAvailableModelIds,
   getCurrentModelConfig,
@@ -24,12 +25,14 @@ import {
   resumeThread,
   rollbackWorktreeToMessage,
   startThread,
+  setThreadKanbanStatus as persistThreadKanbanStatus,
   subscribeCodexNotifications,
   startThreadTurn,
   type RpcNotification,
   type SkillInfo,
 } from '../api/codexGateway'
 import type {
+  KanbanStatus,
   CommandExecutionData,
   ReasoningEffort,
   SpeedMode,
@@ -60,6 +63,12 @@ const REASONING_EFFORT_OPTIONS: ReasoningEffort[] = ['none', 'minimal', 'low', '
 const GLOBAL_SERVER_REQUEST_SCOPE = '__global__'
 const MODEL_FALLBACK_ID = 'gpt-5.2-codex'
 const AUTO_COMMIT_MESSAGE_FALLBACK = 'Auto-commit from Codex rollback chat turn'
+const DEFAULT_KANBAN_STATUS: KanbanStatus = 'backlog'
+
+type KanbanThreadState = {
+  status: KanbanStatus
+  lanePosition: number
+}
 
 function loadReadStateMap(): Record<string, string> {
   if (typeof window === 'undefined') return {}
@@ -513,11 +522,14 @@ function areThreadFieldsEqual(first: UiThread, second: UiThread): boolean {
     first.title === second.title &&
     first.projectName === second.projectName &&
     first.cwd === second.cwd &&
+    first.hasWorktree === second.hasWorktree &&
     first.createdAtIso === second.createdAtIso &&
     first.updatedAtIso === second.updatedAtIso &&
     first.preview === second.preview &&
     first.unread === second.unread &&
-    first.inProgress === second.inProgress
+    first.inProgress === second.inProgress &&
+    first.kanbanStatus === second.kanbanStatus &&
+    first.kanbanPosition === second.kanbanPosition
   )
 }
 
@@ -657,6 +669,7 @@ export function useDesktopState() {
   const queuedMessagesByThreadId = ref<Record<string, QueuedMessage[]>>({})
   const queueProcessingByThreadId = ref<Record<string, boolean>>({})
   const eventUnreadByThreadId = ref<Record<string, boolean>>({})
+  const kanbanStateByThreadId = ref<Record<string, KanbanThreadState>>({})
   const availableModelIds = ref<string[]>([])
   const selectedModelId = ref(loadSelectedModelId())
   const selectedReasoningEffort = ref<ReasoningEffort | ''>('medium')
@@ -1011,24 +1024,54 @@ export function useDesktopState() {
     }))
   }
 
+  function getDefaultKanbanPosition(thread: UiThread): number {
+    const updatedAtMs = new Date(thread.updatedAtIso || thread.createdAtIso).getTime()
+    if (Number.isFinite(updatedAtMs) && updatedAtMs > 0) return updatedAtMs
+    return Date.now()
+  }
+
+  function getKanbanStateForThread(thread: UiThread): KanbanThreadState {
+    const persisted = kanbanStateByThreadId.value[thread.id]
+    if (persisted) {
+      return persisted
+    }
+    return {
+      status: thread.kanbanStatus || DEFAULT_KANBAN_STATUS,
+      lanePosition: Number.isFinite(thread.kanbanPosition) ? thread.kanbanPosition : getDefaultKanbanPosition(thread),
+    }
+  }
+
+  function ensureSelectedThreadStillVisible(): void {
+    const flatThreads = flattenThreads(projectGroups.value)
+    if (flatThreads.some((thread) => thread.id === selectedThreadId.value)) return
+    setSelectedThreadId(flatThreads[0]?.id ?? '')
+  }
+
   function applyThreadFlags(): void {
     const withTitles = applyCachedTitlesToGroups(sourceGroups.value)
-    const flaggedGroups: UiProjectGroup[] = withTitles.map((group) => ({
-      projectName: group.projectName,
-      threads: group.threads.map((thread) => {
-        const inProgress = inProgressById.value[thread.id] === true
-        const isSelected = selectedThreadId.value === thread.id
-        const lastReadIso = readStateByThreadId.value[thread.id]
-        const unreadByEvent = eventUnreadByThreadId.value[thread.id] === true
-        const unread = !isSelected && !inProgress && (unreadByEvent || lastReadIso !== thread.updatedAtIso)
+    const flaggedGroups: UiProjectGroup[] = withTitles
+      .map((group) => ({
+        projectName: group.projectName,
+        threads: group.threads
+          .map((thread) => {
+            const inProgress = inProgressById.value[thread.id] === true
+            const isSelected = selectedThreadId.value === thread.id
+            const lastReadIso = readStateByThreadId.value[thread.id]
+            const unreadByEvent = eventUnreadByThreadId.value[thread.id] === true
+            const unread = !isSelected && !inProgress && (unreadByEvent || lastReadIso !== thread.updatedAtIso)
+            const kanban = getKanbanStateForThread(thread)
 
-        return {
-          ...thread,
-          inProgress,
-          unread,
-        }
-      }),
-    }))
+            return {
+              ...thread,
+              inProgress,
+              unread,
+              kanbanStatus: kanban.status,
+              kanbanPosition: kanban.lanePosition,
+            }
+          })
+          .filter((thread) => thread.kanbanStatus !== 'archived'),
+      }))
+      .filter((group) => group.threads.length > 0)
     projectGroups.value = mergeThreadGroups(projectGroups.value, flaggedGroups)
   }
 
@@ -1047,6 +1090,8 @@ export function useDesktopState() {
       preview: firstMessageText,
       unread: false,
       inProgress: false,
+      kanbanStatus: DEFAULT_KANBAN_STATUS,
+      kanbanPosition: Date.now(),
     }
 
     const existingGroupIndex = sourceGroups.value.findIndex((group) => group.projectName === projectName)
@@ -2160,7 +2205,21 @@ export function useDesktopState() {
     }
 
     try {
-      const [groups] = await Promise.all([getThreadGroups(), loadThreadTitleCacheIfNeeded()])
+      const [groups, kanbanBoard] = await Promise.all([
+        getThreadGroups(),
+        getKanbanBoardState().catch(() => null),
+        loadThreadTitleCacheIfNeeded(),
+      ])
+      if (kanbanBoard) {
+        const nextKanbanState: Record<string, KanbanThreadState> = {}
+        for (const item of Object.values(kanbanBoard.itemsByThreadId)) {
+          nextKanbanState[item.threadId] = {
+            status: item.status,
+            lanePosition: item.lanePosition,
+          }
+        }
+        kanbanStateByThreadId.value = nextKanbanState
+      }
       await hydrateWorkspaceRootsStateIfNeeded(groups)
 
       const nextProjectOrder = mergeProjectOrder(projectOrder.value, groups)
@@ -2293,6 +2352,63 @@ export function useDesktopState() {
         await loadMessages(selectedThreadId.value)
       }
     } catch (unknownError) {
+      error.value = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
+    }
+  }
+
+  async function setThreadKanbanStatusById(threadId: string, status: KanbanStatus) {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return
+
+    const thread = flattenThreads(sourceGroups.value).find((row) => row.id === normalizedThreadId)
+    const previousState = kanbanStateByThreadId.value[normalizedThreadId]
+    const optimisticState: KanbanThreadState = {
+      status,
+      lanePosition:
+        status !== previousState?.status
+          ? Date.now()
+          : previousState?.lanePosition ?? thread?.kanbanPosition ?? Date.now(),
+    }
+
+    kanbanStateByThreadId.value = {
+      ...kanbanStateByThreadId.value,
+      [normalizedThreadId]: optimisticState,
+    }
+    applyThreadFlags()
+    ensureSelectedThreadStillVisible()
+
+    try {
+      const persisted = await persistThreadKanbanStatus(normalizedThreadId, {
+        status,
+        snapshot: thread
+          ? {
+              title: thread.title,
+              cwd: thread.cwd,
+              projectName: thread.projectName,
+            }
+          : undefined,
+      })
+
+      kanbanStateByThreadId.value = {
+        ...kanbanStateByThreadId.value,
+        [normalizedThreadId]: {
+          status: persisted.status,
+          lanePosition: persisted.lanePosition,
+        },
+      }
+      applyThreadFlags()
+      ensureSelectedThreadStillVisible()
+    } catch (unknownError) {
+      if (previousState) {
+        kanbanStateByThreadId.value = {
+          ...kanbanStateByThreadId.value,
+          [normalizedThreadId]: previousState,
+        }
+      } else {
+        kanbanStateByThreadId.value = omitKey(kanbanStateByThreadId.value, normalizedThreadId)
+      }
+      applyThreadFlags()
+      ensureSelectedThreadStillVisible()
       error.value = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
     }
   }
@@ -2973,6 +3089,7 @@ export function useDesktopState() {
     selectThread,
     setThreadScrollState,
     archiveThreadById,
+    setThreadKanbanStatusById,
     renameThreadById,
     forkThreadById,
     sendMessageToSelectedThread,
