@@ -104,6 +104,7 @@
           :disabled="isInteractionDisabled"
           @input="onInputChange"
           @keydown="onInputKeydown"
+          @paste="onInputPaste"
         />
         <ComposerSkillPicker
           :skills="skillOptions"
@@ -821,27 +822,37 @@ function isImageFile(file: File): boolean {
   return /\.(png|jpe?g|gif|webp)$/i.test(file.name)
 }
 
-function addFiles(files: FileList | null): void {
-  if (!files || files.length === 0) return
+function addImageFile(file: File, generation: number): void {
+  const displayName = file.name.trim() || 'Pasted image'
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (generation !== draftGeneration.value) return
+    if (typeof reader.result !== 'string') return
+    selectedImages.value.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: displayName,
+      url: reader.result,
+    })
+  }
+  reader.readAsDataURL(file)
+}
+
+function addUploadedFile(file: File, generation: number): void {
+  void uploadFile(file).then((serverPath) => {
+    if (generation !== draftGeneration.value) return
+    if (serverPath) addFileAttachment(serverPath)
+  }).catch(() => {})
+}
+
+function addFiles(files: FileList | File[] | null): void {
+  const rows = files ? Array.from(files) : []
+  if (rows.length === 0) return
   const generation = draftGeneration.value
-  for (const file of Array.from(files)) {
+  for (const file of rows) {
     if (isImageFile(file)) {
-      const reader = new FileReader()
-      reader.onload = () => {
-        if (generation !== draftGeneration.value) return
-        if (typeof reader.result !== 'string') return
-        selectedImages.value.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          name: file.name,
-          url: reader.result,
-        })
-      }
-      reader.readAsDataURL(file)
+      addImageFile(file, generation)
     } else {
-      void uploadFile(file).then((serverPath) => {
-        if (generation !== draftGeneration.value) return
-        if (serverPath) addFileAttachment(serverPath)
-      }).catch(() => {})
+      addUploadedFile(file, generation)
     }
   }
 }
@@ -917,6 +928,26 @@ function onFolderPickerChange(event: Event): void {
   const input = event.target as HTMLInputElement | null
   void addFolderFiles(input?.files ?? null)
   clearInputValue(input)
+  isAttachMenuOpen.value = false
+}
+
+function onInputPaste(event: ClipboardEvent): void {
+  const clipboardData = event.clipboardData
+  if (!clipboardData) return
+  const imageFiles = Array.from(clipboardData.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
+    .filter((file) => isImageFile(file))
+
+  if (imageFiles.length === 0) return
+
+  addFiles(imageFiles)
+  const clipboardTypes = Array.from(clipboardData.types ?? [])
+  const hasTextPayload = clipboardTypes.includes('text/plain') || clipboardTypes.includes('text/html')
+  if (!hasTextPayload) {
+    event.preventDefault()
+  }
   isAttachMenuOpen.value = false
 }
 
