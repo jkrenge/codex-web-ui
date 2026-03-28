@@ -225,6 +225,16 @@ After each feature implementation session that uses this skill:
 - For this repository, thread-board state should therefore be treated as an intentional local extension layered on top of Codex thread IDs rather than a parity feature.
 - The safest integration point is a separate persisted store keyed by `threadId`, without reusing Codex's built-in `thread/archive` RPC for board-level archive semantics.
 
+## Findings: Composer Clipboard Images (2026-03-28)
+
+- Codex.app’s web bundle still exposes a ProseMirror-based composer/mention stack:
+  - Placeholder key `composer.placeholder.newTask.locally.v2`
+  - Mention node key `mention-ui`
+- Bundle searches for `clipboardData`, `getAsFile`, and `paste` did not reveal a composer-specific localized clipboard-image flow; the clear `getAsFile()` hit belongs to PDF/stamp tooling, not chat composition.
+- Practical implication for web-ui parity work: treat clipboard image paste as editor-native behavior unless a dedicated composer hook is found. For this repo, a conservative textarea `paste` handler that reuses the existing selected-image attachment path is an acceptable parity approximation.
+- Useful search pattern for future sessions:
+  - Search the extracted `index-*.js` bundle for nearby composer anchors first, such as `composer.placeholder.newTask.locally.v2`, `mention-ui`, and `ProseMirror`, then inspect clipboard-related terms in that neighborhood.
+
 ## Findings: Thread Fork RPC (2026-03-27)
 
 - The local protocol schemas include a stable `thread/fork` RPC in v2, separate from `thread/start`.

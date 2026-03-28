@@ -85,3 +85,27 @@ This file tracks manual regression and feature verification steps.
 #### Rollback/Cleanup
 - Move test threads back to their desired status before archiving them.
 - If a thread was moved to `Archive`, edit `~/.codex/codexapp/kanban-state.json` and change its `status` to another lane, or delete the file to reset the board state.
+
+### Feature: Composer clipboard image paste
+
+#### Prerequisites
+- App server is running from this repository.
+- Open the web UI with a thread selected or the new-thread composer visible.
+- Copy an image or screenshot into the system clipboard.
+
+#### Steps
+1. Click inside the chat composer textarea.
+2. Paste the clipboard contents with `Cmd+V`.
+3. Confirm an image thumbnail appears above the composer.
+4. If the clipboard also contains plain text, confirm the text still pastes into the composer.
+5. Click the image remove button and confirm the thumbnail disappears.
+6. Paste the image again and send the message.
+
+#### Expected Results
+- Pasted clipboard images are added as composer image attachments without opening the file picker.
+- Non-image text paste behavior continues to work normally.
+- Attached pasted images can be removed before sending.
+- Sent messages render the pasted image in the thread.
+
+#### Rollback/Cleanup
+- Remove any pasted attachments from the composer before leaving the thread.
