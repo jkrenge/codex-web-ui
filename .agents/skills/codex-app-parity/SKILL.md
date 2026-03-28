@@ -219,6 +219,12 @@ After each feature implementation session that uses this skill:
 - App-server RPC for rename uses method `thread/name/set` with params `{ threadId, name }` (not `threadName`).
 - `thread/name/updated` realtime notification carries `{ threadId, threadName }`, so parity implementations should handle both request/response naming differences (`name` on write, `threadName` on notification).
 
+## Findings: Thread Kanban Board (2026-03-28)
+
+- Search across extracted renderer and main-process bundles did not reveal a Codex.app equivalent for a local Kanban/thread-board workflow (`kanban`, `backlog`, and related status labels were absent as product features).
+- For this repository, thread-board state should therefore be treated as an intentional local extension layered on top of Codex thread IDs rather than a parity feature.
+- The safest integration point is a separate persisted store keyed by `threadId`, without reusing Codex's built-in `thread/archive` RPC for board-level archive semantics.
+
 ## Findings: Thread Fork RPC (2026-03-27)
 
 - The local protocol schemas include a stable `thread/fork` RPC in v2, separate from `thread/start`.

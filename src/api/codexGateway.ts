@@ -21,7 +21,7 @@ import {
   normalizeThreadMessagesV2,
   readThreadInProgressFromResponse,
 } from './normalizers/v2'
-import type { SpeedMode, UiMessage, UiProjectGroup } from '../types/codex'
+import type { KanbanStatus, SpeedMode, UiMessage, UiProjectGroup } from '../types/codex'
 import { normalizePathForUi } from '../pathUtils.js'
 
 type CurrentModelConfig = {
@@ -59,6 +59,29 @@ export type WorktreeRollbackResult = {
 export type ThreadSearchResult = {
   threadIds: string[]
   indexedThreadCount: number
+}
+
+export type KanbanBoardSnapshot = {
+  title: string
+  cwd: string
+  projectName: string
+}
+
+export type KanbanBoardItem = {
+  threadId: string
+  status: KanbanStatus
+  lanePosition: number
+  createdAt: string
+  updatedAt: string
+  lastMovedAt: string
+  archivedAt: string | null
+  snapshot: KanbanBoardSnapshot
+}
+
+export type KanbanBoardState = {
+  version: number
+  updatedAt: string
+  itemsByThreadId: Record<string, KanbanBoardItem>
 }
 
 export type TelegramStatus = {
@@ -620,6 +643,123 @@ export async function searchThreads(
     throw new Error(payload.error || 'Failed to search threads')
   }
   return payload.data ?? { threadIds: [], indexedThreadCount: 0 }
+}
+
+function isKanbanStatus(value: string): value is KanbanStatus {
+  return ['backlog', 'in_progress', 'review', 'closed_followup', 'archived'].includes(value)
+}
+
+function normalizeKanbanBoardSnapshot(value: unknown): KanbanBoardSnapshot {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  return {
+    title: typeof record.title === 'string' ? record.title.trim() : '',
+    cwd: typeof record.cwd === 'string' ? normalizePathForUi(record.cwd) : '',
+    projectName: typeof record.projectName === 'string' ? record.projectName.trim() : '',
+  }
+}
+
+function normalizeKanbanBoardItem(value: unknown): KanbanBoardItem | null {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null
+  if (!record) return null
+
+  const threadId = typeof record.threadId === 'string' ? record.threadId.trim() : ''
+  const status = typeof record.status === 'string' ? record.status : ''
+  if (!threadId || !isKanbanStatus(status)) {
+    return null
+  }
+
+  return {
+    threadId,
+    status,
+    lanePosition: typeof record.lanePosition === 'number' && Number.isFinite(record.lanePosition)
+      ? record.lanePosition
+      : 0,
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+    lastMovedAt: typeof record.lastMovedAt === 'string' ? record.lastMovedAt : '',
+    archivedAt: typeof record.archivedAt === 'string' && record.archivedAt.trim().length > 0
+      ? record.archivedAt
+      : null,
+    snapshot: normalizeKanbanBoardSnapshot(record.snapshot),
+  }
+}
+
+function normalizeKanbanBoardState(value: unknown): KanbanBoardState {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  const itemsRaw =
+    record.itemsByThreadId && typeof record.itemsByThreadId === 'object' && !Array.isArray(record.itemsByThreadId)
+      ? (record.itemsByThreadId as Record<string, unknown>)
+      : {}
+  const itemsByThreadId: Record<string, KanbanBoardItem> = {}
+
+  for (const [threadId, itemValue] of Object.entries(itemsRaw)) {
+    const item = normalizeKanbanBoardItem(itemValue)
+    if (!item) continue
+    itemsByThreadId[item.threadId || threadId] = item
+  }
+
+  return {
+    version: typeof record.version === 'number' && Number.isFinite(record.version) ? record.version : 1,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+    itemsByThreadId,
+  }
+}
+
+export async function getKanbanBoardState(): Promise<KanbanBoardState> {
+  const response = await fetch('/codex-api/kanban/board')
+  const payload = (await response.json()) as unknown
+  if (!response.ok) {
+    const message = getErrorMessageFromPayload(payload, 'Failed to load Kanban board state')
+    throw new Error(message)
+  }
+  const record =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {}
+  return normalizeKanbanBoardState(record.data)
+}
+
+export async function setThreadKanbanStatus(
+  threadId: string,
+  payload: {
+    status: KanbanStatus
+    lanePosition?: number
+    snapshot?: Partial<KanbanBoardSnapshot>
+  },
+): Promise<KanbanBoardItem> {
+  const normalizedThreadId = threadId.trim()
+  if (!normalizedThreadId) {
+    throw new Error('Missing threadId')
+  }
+
+  const response = await fetch(`/codex-api/kanban/thread/${encodeURIComponent(normalizedThreadId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const body = (await response.json()) as unknown
+  if (!response.ok) {
+    const message = getErrorMessageFromPayload(body, 'Failed to update Kanban thread state')
+    throw new Error(message)
+  }
+  const record =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {}
+  const item = normalizeKanbanBoardItem(record.data)
+  if (!item) {
+    throw new Error('Kanban thread update returned invalid data')
+  }
+  return item
 }
 
 export async function configureTelegramBot(

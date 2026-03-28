@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { writeFile } from 'node:fs/promises'
+import { createKanbanBoardStore, isKanbanStatus, type KanbanLiveThread } from './kanbanBoardStore.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
 import { TelegramThreadBridge } from './telegramThreadBridge.js'
 import { getSpawnInvocation } from '../utils/commandInvocation.js'
@@ -150,6 +151,42 @@ function extractThreadMessageText(threadReadPayload: unknown): string {
   }
 
   return parts.join('\n').trim()
+}
+
+function pickThreadName(summary: Record<string, unknown>): string {
+  const candidates = [summary.name, summary.title, summary.preview]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim()
+    }
+  }
+  return 'Untitled thread'
+}
+
+function normalizeLiveKanbanThreads(payload: unknown): KanbanLiveThread[] {
+  const record = asRecord(payload)
+  const data = Array.isArray(record?.data) ? record.data : []
+  const rows: KanbanLiveThread[] = []
+
+  for (const item of data) {
+    const summary = asRecord(item)
+    if (!summary) continue
+    const threadId = typeof summary.id === 'string' ? summary.id.trim() : ''
+    if (!threadId) continue
+    const cwd = typeof summary.cwd === 'string' ? summary.cwd.trim() : ''
+    const updatedAtSeconds = typeof summary.updatedAt === 'number' && Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0
+    const createdAtSeconds = typeof summary.createdAt === 'number' && Number.isFinite(summary.createdAt) ? summary.createdAt : 0
+
+    rows.push({
+      threadId,
+      title: pickThreadName(summary),
+      cwd,
+      updatedAtMs: updatedAtSeconds > 0 ? updatedAtSeconds * 1000 : 0,
+      createdAtMs: createdAtSeconds > 0 ? createdAtSeconds * 1000 : 0,
+    })
+  }
+
+  return rows
 }
 
 function isExactPhraseMatch(query: string, doc: ThreadSearchDocument): boolean {
@@ -1513,6 +1550,7 @@ async function buildThreadSearchIndex(appServer: AppServerProcess): Promise<Thre
 
 export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
   const { appServer, methodCatalog, telegramBridge } = getSharedBridgeState()
+  const kanbanBoardStore = createKanbanBoardStore({ codexHomeDir: getCodexHomeDir() })
   let threadSearchIndex: ThreadSearchIndex | null = null
   let threadSearchIndexPromise: Promise<ThreadSearchIndex> | null = null
 
@@ -1957,6 +1995,58 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
       if (req.method === 'GET' && url.pathname === '/codex-api/thread-titles') {
         const cache = await readMergedThreadTitleCache()
         setJson(res, 200, { data: cache })
+        return
+      }
+
+      if (req.method === 'GET' && url.pathname === '/codex-api/kanban/board') {
+        try {
+          const payload = await appServer.rpc('thread/list', {
+            archived: false,
+            limit: 1000,
+            sortKey: 'updated_at',
+          })
+          const liveThreads = normalizeLiveKanbanThreads(payload)
+          const board = await kanbanBoardStore.getBoard(liveThreads)
+          setJson(res, 200, { data: board })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to load Kanban board state') })
+        }
+        return
+      }
+
+      if (req.method === 'PATCH' && url.pathname.startsWith('/codex-api/kanban/thread/')) {
+        const threadId = decodeURIComponent(url.pathname.slice('/codex-api/kanban/thread/'.length)).trim()
+        if (!threadId) {
+          setJson(res, 400, { error: 'Missing threadId' })
+          return
+        }
+
+        const payload = asRecord(await readJsonBody(req))
+        const status = payload?.status
+        if (status !== undefined && !isKanbanStatus(status)) {
+          setJson(res, 400, { error: 'Invalid status' })
+          return
+        }
+
+        const snapshot = asRecord(payload?.snapshot)
+
+        try {
+          const item = await kanbanBoardStore.updateThread({
+            threadId,
+            status,
+            lanePosition: typeof payload?.lanePosition === 'number' ? payload.lanePosition : undefined,
+            snapshot: snapshot
+              ? {
+                  title: typeof snapshot.title === 'string' ? snapshot.title : undefined,
+                  cwd: typeof snapshot.cwd === 'string' ? snapshot.cwd : undefined,
+                  projectName: typeof snapshot.projectName === 'string' ? snapshot.projectName : undefined,
+                }
+              : undefined,
+          })
+          setJson(res, 200, { data: item })
+        } catch (error) {
+          setJson(res, 500, { error: getErrorMessage(error, 'Failed to update Kanban thread state') })
+        }
         return
       }
 
