@@ -86,6 +86,29 @@ This file tracks manual regression and feature verification steps.
 - Move test threads back to their desired status before archiving them.
 - If a thread was moved to `Archive`, edit `~/.codex/codexapp/kanban-state.json` and change its `status` to another lane, or delete the file to reset the board state.
 
+### Feature: Kanban board drag cards between columns
+
+#### Prerequisites
+- App server is running from this repository.
+- The sidebar is visible in desktop layout.
+- At least one visible thread exists in the `Backlog` lane after switching to `Kanban board`.
+
+#### Steps
+1. Open the sidebar thread organize menu and switch to `Kanban board`.
+2. Drag a thread card from `Backlog` into the `In progress` lane.
+3. Confirm the destination lane highlights while the card is dragged over it.
+4. Drop the card and confirm it disappears from `Backlog` and appears in `In progress`.
+5. Refresh the browser.
+6. Confirm the same thread remains in `In progress`.
+
+#### Expected Results
+- Kanban cards can be dragged between visible columns.
+- The hovered destination lane shows a visual drop state during drag.
+- Dropping a card updates its lane immediately and persists after refresh.
+
+#### Rollback/Cleanup
+- Drag the test card back to its original lane, or move it back with the thread card menu.
+
 ### Feature: Kanban board expands sidebar for four-column layout
 
 #### Prerequisites

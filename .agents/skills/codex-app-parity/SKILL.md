@@ -240,6 +240,15 @@ After each feature implementation session that uses this skill:
 - Re-checking the extracted Codex.app bundles for this follow-up UI change did not reveal any desktop Kanban board or widened multi-column sidebar treatment to mirror.
 - Sidebar width behavior for this repository's Kanban mode should therefore remain a repo-owned extension keyed off the locally persisted thread view mode, not an app-server or Codex.app parity contract.
 
+## Findings: Kanban Card Drag And Drop (2026-03-28)
+
+- Re-checking the extracted Codex.app bundles for Kanban/card drag behavior still found no desktop equivalent; this interaction remains repo-owned rather than parity-driven.
+- In this repository, Kanban card moves can stay on the existing `set-kanban-status` persistence path; no separate server mutation is needed for cross-column moves when dropping into a different lane.
+- Native HTML5 drag events are sufficient for the current sidebar implementation:
+  - draggable source: `.kanban-thread-row`
+  - droppable target: `article.kanban-lane`
+- Browser verification can exercise this by dispatching `dragstart`, `dragenter`, `dragover`, `drop`, and `dragend` with a shared `DataTransfer` object when higher-level CLI drag helpers are unreliable.
+
 ## Findings: Thread Fork RPC (2026-03-27)
 
 - The local protocol schemas include a stable `thread/fork` RPC in v2, separate from `thread/start`.

@@ -116,7 +116,15 @@
     <p v-else-if="isLoading && groups.length === 0" class="thread-tree-loading">Loading threads...</p>
 
     <section v-else-if="isKanbanView" class="kanban-board">
-      <article v-for="lane in kanbanLanes" :key="lane.status" class="kanban-lane">
+      <article
+        v-for="lane in kanbanLanes"
+        :key="lane.status"
+        class="kanban-lane"
+        :data-drag-over="isKanbanLaneDragOver(lane.status)"
+        @dragenter.prevent="onKanbanLaneDragOver(lane.status)"
+        @dragover.prevent="onKanbanLaneDragOver(lane.status, $event)"
+        @drop.prevent="onKanbanLaneDrop(lane.status)"
+      >
         <SidebarMenuRow as="header" class="kanban-lane-header-row">
           <span class="kanban-lane-title">{{ lane.label }}</span>
           <template #right>
@@ -125,13 +133,23 @@
         </SidebarMenuRow>
 
         <ul v-if="lane.threads.length > 0" class="thread-list kanban-lane-list">
-          <li v-for="thread in lane.threads" :key="thread.id" class="thread-row-item">
+          <li
+            v-for="thread in lane.threads"
+            :key="thread.id"
+            class="thread-row-item"
+            :data-dragging="isKanbanThreadDragging(thread.id)"
+          >
             <SidebarMenuRow
               class="thread-row kanban-thread-row"
               :data-active="thread.id === selectedThreadId"
+              :data-dragging="isKanbanThreadDragging(thread.id)"
               :force-right-hover="isThreadMenuOpen(thread.id)"
+              draggable="true"
+              :aria-grabbed="isKanbanThreadDragging(thread.id) ? 'true' : 'false'"
               @mouseleave="onThreadRowLeave(thread.id)"
               @contextmenu="onThreadRowContextMenu($event, thread.id)"
+              @dragstart="onKanbanThreadDragStart($event, thread.id, lane.status)"
+              @dragend="onKanbanThreadDragEnd"
             >
               <template #left>
                 <span class="thread-left-stack">
@@ -555,6 +573,11 @@ type KanbanLaneDefinition = {
   emptyLabel: string
 }
 
+type ActiveKanbanDrag = {
+  threadId: string
+  fromStatus: Exclude<KanbanStatus, 'archived'>
+}
+
 const DRAG_START_THRESHOLD_PX = 4
 const PROJECT_GROUP_EXPANDED_GAP_PX = 6
 const expandedProjects = ref<Record<string, boolean>>({})
@@ -593,6 +616,8 @@ const KANBAN_LANES: KanbanLaneDefinition[] = [
   { status: 'closed_followup', label: 'Closed / followup', emptyLabel: 'No follow-up items' },
 ]
 const KANBAN_MENU_STATUSES: KanbanStatus[] = [...KANBAN_LANES.map((lane) => lane.status), 'archived']
+const activeKanbanDrag = ref<ActiveKanbanDrag | null>(null)
+const dragOverKanbanStatus = ref<Exclude<KanbanStatus, 'archived'> | null>(null)
 const projectGroupResizeObserver =
   typeof window !== 'undefined'
     ? new ResizeObserver((entries) => {
@@ -989,6 +1014,50 @@ function getKanbanStatusLabel(status: KanbanStatus): string {
 function moveThreadToKanbanStatus(threadId: string, status: KanbanStatus): void {
   emit('set-kanban-status', { threadId, status })
   closeThreadMenu()
+}
+
+function isKanbanThreadDragging(threadId: string): boolean {
+  return activeKanbanDrag.value?.threadId === threadId
+}
+
+function isKanbanLaneDragOver(status: Exclude<KanbanStatus, 'archived'>): boolean {
+  return dragOverKanbanStatus.value === status
+}
+
+function onKanbanThreadDragStart(
+  event: DragEvent,
+  threadId: string,
+  fromStatus: Exclude<KanbanStatus, 'archived'>,
+): void {
+  activeKanbanDrag.value = { threadId, fromStatus }
+  dragOverKanbanStatus.value = fromStatus
+  closeThreadMenu()
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', threadId)
+  }
+}
+
+function onKanbanThreadDragEnd(): void {
+  activeKanbanDrag.value = null
+  dragOverKanbanStatus.value = null
+}
+
+function onKanbanLaneDragOver(status: Exclude<KanbanStatus, 'archived'>, event?: DragEvent): void {
+  if (!activeKanbanDrag.value) return
+  dragOverKanbanStatus.value = status
+  if (event?.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onKanbanLaneDrop(status: Exclude<KanbanStatus, 'archived'>): void {
+  const drag = activeKanbanDrag.value
+  if (!drag) return
+  if (drag.fromStatus !== status) {
+    emit('set-kanban-status', { threadId: drag.threadId, status })
+  }
+  onKanbanThreadDragEnd()
 }
 
 function toggleProjectMenu(projectName: string): void {
@@ -1523,6 +1592,7 @@ onBeforeUnmount(() => {
   projectGroupElementByName.clear()
   projectMenuWrapElementByName.clear()
   unbindProjectMenuDismissListeners()
+  onKanbanThreadDragEnd()
   resetProjectDragState()
 })
 </script>
@@ -1591,6 +1661,15 @@ onBeforeUnmount(() => {
   @apply min-w-0 flex flex-col gap-1;
 }
 
+.kanban-lane[data-drag-over='true'] .kanban-lane-header-row {
+  @apply bg-zinc-200 text-zinc-900;
+}
+
+.kanban-lane[data-drag-over='true'] .kanban-lane-list,
+.kanban-lane[data-drag-over='true'] .project-empty-row {
+  @apply rounded-xl ring-2 ring-zinc-300/80 ring-inset;
+}
+
 .kanban-lane-header-row {
   @apply cursor-default rounded-xl bg-zinc-100/80 px-3 py-2;
 }
@@ -1608,7 +1687,15 @@ onBeforeUnmount(() => {
 }
 
 .kanban-thread-row {
-  @apply min-w-0 rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white;
+  @apply min-w-0 rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white cursor-grab;
+}
+
+.kanban-thread-row[data-dragging='true'] {
+  @apply opacity-60 cursor-grabbing;
+}
+
+.thread-row-item[data-dragging='true'] {
+  @apply z-10;
 }
 
 .kanban-thread-main-button {
