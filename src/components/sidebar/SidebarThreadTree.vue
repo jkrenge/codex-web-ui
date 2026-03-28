@@ -483,7 +483,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { KanbanStatus, UiProjectGroup, UiThread } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
@@ -509,6 +509,7 @@ const emit = defineEmits<{
   select: [threadId: string]
   archive: [threadId: string]
   'set-kanban-status': [payload: { threadId: string; status: KanbanStatus }]
+  'thread-view-mode-change': [mode: 'project' | 'chronological' | 'kanban']
   'start-new-thread': [projectName: string]
   'browse-thread-files': [threadId: string]
   'rename-project': [payload: { projectName: string; displayName: string }]
@@ -641,6 +642,11 @@ watch(
 watch(threadViewMode, (value) => {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(THREAD_VIEW_MODE_STORAGE_KEY, value)
+  emit('thread-view-mode-change', value)
+})
+
+onMounted(() => {
+  emit('thread-view-mode-change', threadViewMode.value)
 })
 
 const normalizedSearchQuery = computed(() => props.searchQuery.trim().toLowerCase())
@@ -1577,11 +1583,12 @@ onBeforeUnmount(() => {
 }
 
 .kanban-board {
-  @apply flex flex-col gap-3 pr-0.5;
+  @apply grid gap-3 pr-0.5 items-start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .kanban-lane {
-  @apply flex flex-col gap-1;
+  @apply min-w-0 flex flex-col gap-1;
 }
 
 .kanban-lane-header-row {
@@ -1597,11 +1604,11 @@ onBeforeUnmount(() => {
 }
 
 .kanban-lane-list {
-  @apply gap-1;
+  @apply min-w-0 gap-1;
 }
 
 .kanban-thread-row {
-  @apply rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white;
+  @apply min-w-0 rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white;
 }
 
 .kanban-thread-main-button {

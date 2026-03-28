@@ -86,6 +86,31 @@ This file tracks manual regression and feature verification steps.
 - Move test threads back to their desired status before archiving them.
 - If a thread was moved to `Archive`, edit `~/.codex/codexapp/kanban-state.json` and change its `status` to another lane, or delete the file to reset the board state.
 
+### Feature: Kanban board expands sidebar for four-column layout
+
+#### Prerequisites
+- App server is running from this repository.
+- Open the web UI on a desktop-width browser window.
+- At least one visible thread exists in each Kanban lane, or enough threads to populate multiple lanes.
+
+#### Steps
+1. Open the sidebar thread organize menu and switch to `Kanban board`.
+2. Confirm the desktop sidebar expands noticeably wider than the normal thread list width.
+3. Verify `Backlog`, `In progress`, `Review`, and `Closed / followup` render side by side in a single row.
+4. Switch the organize menu back to `Chronological list`.
+5. Confirm the sidebar returns to its normal width.
+6. Switch back to `Kanban board` and drag the desktop sidebar resize handle.
+7. Confirm the resize handle continues to track the pointer cleanly while the expanded Kanban width updates.
+
+#### Expected Results
+- Desktop Kanban mode expands the sidebar enough to present four lanes in parallel.
+- Non-Kanban modes keep the original sidebar width.
+- Sidebar resizing remains usable after the Kanban width multiplier is applied.
+
+#### Rollback/Cleanup
+- Switch the organize menu back to `By project` or `Chronological list`.
+- Reset the sidebar width with the resize handle if you changed it during testing.
+
 ### Feature: Composer clipboard image paste
 
 #### Prerequisites

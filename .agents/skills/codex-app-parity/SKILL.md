@@ -235,6 +235,11 @@ After each feature implementation session that uses this skill:
 - Useful search pattern for future sessions:
   - Search the extracted `index-*.js` bundle for nearby composer anchors first, such as `composer.placeholder.newTask.locally.v2`, `mention-ui`, and `ProseMirror`, then inspect clipboard-related terms in that neighborhood.
 
+## Findings: Kanban Sidebar Width (2026-03-28)
+
+- Re-checking the extracted Codex.app bundles for this follow-up UI change did not reveal any desktop Kanban board or widened multi-column sidebar treatment to mirror.
+- Sidebar width behavior for this repository's Kanban mode should therefore remain a repo-owned extension keyed off the locally persisted thread view mode, not an app-server or Codex.app parity contract.
+
 ## Findings: Thread Fork RPC (2026-03-27)
 
 - The local protocol schemas include a stable `thread/fork` RPC in v2, separate from `thread/start`.

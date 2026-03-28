@@ -1,5 +1,9 @@
 <template>
-  <DesktopLayout :is-sidebar-collapsed="isSidebarCollapsed" @close-sidebar="setSidebarCollapsed(true)">
+  <DesktopLayout
+    :is-sidebar-collapsed="isSidebarCollapsed"
+    :is-kanban-sidebar="sidebarThreadViewMode === 'kanban'"
+    @close-sidebar="setSidebarCollapsed(true)"
+  >
     <template #sidebar>
       <section class="sidebar-root">
         <div class="sidebar-scrollable">
@@ -62,6 +66,7 @@
             @select="onSelectThread"
             @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
             @set-kanban-status="onSetThreadKanbanStatus"
+            @thread-view-mode-change="onSidebarThreadViewModeChange"
             @browse-thread-files="onBrowseThreadFiles"
             @rename-thread="onRenameThread"
             @fork-thread="onForkThread"
@@ -324,6 +329,7 @@ import type { GithubTipsScope, GithubTrendingProject, TelegramStatus } from './a
 import { getPathLeafName, getPathParent } from './pathUtils.js'
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
+const THREAD_VIEW_MODE_STORAGE_KEY = 'codex-web-local.thread-view-mode.v1'
 const worktreeName = import.meta.env.VITE_WORKTREE_NAME ?? 'unknown'
 const appVersion = import.meta.env.VITE_APP_VERSION ?? 'unknown'
 const SETTINGS_HELP = {
@@ -491,6 +497,7 @@ const {
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useMobile()
+type SidebarThreadViewMode = 'project' | 'chronological' | 'kanban'
 const homeThreadComposerRef = ref<ThreadComposerExposed | null>(null)
 const threadComposerRef = ref<ThreadComposerExposed | null>(null)
 const trendingProjects = ref<GithubTrendingProject[]>([])
@@ -508,6 +515,7 @@ const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: str
   message: '',
 })
 const isSidebarCollapsed = ref(loadSidebarCollapsed())
+const sidebarThreadViewMode = ref<SidebarThreadViewMode>(loadSidebarThreadViewMode())
 const sidebarSearchQuery = ref('')
 const isSidebarSearchVisible = ref(false)
 const sidebarSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -760,6 +768,10 @@ function onArchiveThread(threadId: string): void {
 
 function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus }): void {
   void setThreadKanbanStatusById(payload.threadId, payload.status)
+}
+
+function onSidebarThreadViewModeChange(mode: SidebarThreadViewMode): void {
+  sidebarThreadViewMode.value = mode
 }
 
 async function onForkThread(threadId: string): Promise<void> {
@@ -1225,6 +1237,13 @@ function loadBoolPref(key: string, fallback: boolean): boolean {
   const v = window.localStorage.getItem(key)
   if (v === null) return fallback
   return v === '1'
+}
+
+function loadSidebarThreadViewMode(): SidebarThreadViewMode {
+  if (typeof window === 'undefined') return 'project'
+  const value = window.localStorage.getItem(THREAD_VIEW_MODE_STORAGE_KEY)
+  if (value === 'chronological' || value === 'kanban') return value
+  return 'project'
 }
 
 function loadDarkModePref(): 'system' | 'light' | 'dark' {
