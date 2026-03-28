@@ -109,6 +109,33 @@ This file tracks manual regression and feature verification steps.
 #### Rollback/Cleanup
 - Drag the test card back to its original lane, or move it back with the thread card menu.
 
+### Feature: Kanban board lane changes persist from menu and drag
+
+#### Prerequisites
+- App server is running from this repository.
+- The sidebar is visible in desktop layout with `Kanban board` enabled.
+- At least one visible thread exists in the board.
+- Access to `~/.codex/codexapp/kanban-state.json` on the host machine.
+
+#### Steps
+1. Open a thread card menu and move the card from its current lane to `Review`.
+2. Confirm the card leaves its original lane immediately and appears in `Review`.
+3. Open `~/.codex/codexapp/kanban-state.json` and confirm that thread entry now has `status: "review"`.
+4. Drag the same card from `Review` to `Closed / followup`.
+5. Confirm the card leaves `Review` immediately and appears in `Closed / followup`.
+6. Re-open `~/.codex/codexapp/kanban-state.json` and confirm the same thread entry now has `status: "closed_followup"`.
+7. Refresh the browser and confirm the card remains in `Closed / followup`.
+
+#### Expected Results
+- Menu-based lane changes update the board immediately.
+- Drag-and-drop lane changes update the board immediately.
+- `~/.codex/codexapp/kanban-state.json` matches the latest lane after each move.
+- The card stays in the chosen lane after refresh.
+
+#### Rollback/Cleanup
+- Move the test card back to its original lane after verification.
+- Delete `~/.codex/codexapp/kanban-state.json` if you need to reset local kanban state completely.
+
 ### Feature: Kanban board expands sidebar for four-column layout
 
 #### Prerequisites

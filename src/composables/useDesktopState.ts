@@ -591,6 +591,46 @@ function mergeThreadGroups(
   return areGroupArraysEqual(previous, mergedGroups) ? previous : mergedGroups
 }
 
+function updateThreadKanbanStateInGroups(
+  groups: UiProjectGroup[],
+  threadId: string,
+  nextState: KanbanThreadState,
+): UiProjectGroup[] {
+  let changed = false
+  const nextGroups = groups.map((group) => {
+    let groupChanged = false
+    const nextThreads = group.threads.map((thread) => {
+      if (thread.id !== threadId) {
+        return thread
+      }
+
+      const nextThread: UiThread = {
+        ...thread,
+        kanbanStatus: nextState.status,
+        kanbanPosition: nextState.lanePosition,
+      }
+      if (areThreadFieldsEqual(thread, nextThread)) {
+        return thread
+      }
+
+      groupChanged = true
+      changed = true
+      return nextThread
+    })
+
+    if (!groupChanged) {
+      return group
+    }
+
+    return {
+      projectName: group.projectName,
+      threads: nextThreads,
+    }
+  })
+
+  return changed ? nextGroups : groups
+}
+
 function mergeIncomingWithLocalInProgressThreads(
   previous: UiProjectGroup[],
   incoming: UiProjectGroup[],
@@ -2362,6 +2402,7 @@ export function useDesktopState() {
 
     const thread = flattenThreads(sourceGroups.value).find((row) => row.id === normalizedThreadId)
     const previousState = kanbanStateByThreadId.value[normalizedThreadId]
+    const previousSourceGroups = sourceGroups.value
     const optimisticState: KanbanThreadState = {
       status,
       lanePosition:
@@ -2374,12 +2415,14 @@ export function useDesktopState() {
       ...kanbanStateByThreadId.value,
       [normalizedThreadId]: optimisticState,
     }
+    sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, optimisticState)
     applyThreadFlags()
     ensureSelectedThreadStillVisible()
 
     try {
       const persisted = await persistThreadKanbanStatus(normalizedThreadId, {
         status,
+        lanePosition: optimisticState.lanePosition,
         snapshot: thread
           ? {
               title: thread.title,
@@ -2396,9 +2439,14 @@ export function useDesktopState() {
           lanePosition: persisted.lanePosition,
         },
       }
+      sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, {
+        status: persisted.status,
+        lanePosition: persisted.lanePosition,
+      })
       applyThreadFlags()
       ensureSelectedThreadStillVisible()
     } catch (unknownError) {
+      sourceGroups.value = previousSourceGroups
       if (previousState) {
         kanbanStateByThreadId.value = {
           ...kanbanStateByThreadId.value,
