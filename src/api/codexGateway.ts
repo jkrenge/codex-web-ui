@@ -14,9 +14,11 @@ import type {
   ReasoningEffort,
   ThreadListResponse,
   ThreadReadResponse,
+  Turn,
 } from './appServerDtos'
 import { normalizeCodexApiError } from './codexErrors'
 import {
+  readActiveTurnIdFromResponse,
   normalizeThreadGroupsV2,
   normalizeThreadMessagesV2,
   readThreadInProgressFromResponse,
@@ -169,7 +171,7 @@ async function getThreadMessagesV2(threadId: string): Promise<UiMessage[]> {
   return normalizeThreadMessagesV2(payload)
 }
 
-async function getThreadDetailV2(threadId: string): Promise<{ messages: UiMessage[]; inProgress: boolean }> {
+async function getThreadDetailV2(threadId: string): Promise<{ messages: UiMessage[]; inProgress: boolean; activeTurnId: string }> {
   const payload = await callRpc<ThreadReadResponse>('thread/read', {
     threadId,
     includeTurns: true,
@@ -177,6 +179,7 @@ async function getThreadDetailV2(threadId: string): Promise<{ messages: UiMessag
   return {
     messages: normalizeThreadMessagesV2(payload),
     inProgress: readThreadInProgressFromResponse(payload),
+    activeTurnId: readActiveTurnIdFromResponse(payload),
   }
 }
 
@@ -196,7 +199,7 @@ export async function getThreadMessages(threadId: string): Promise<UiMessage[]> 
   }
 }
 
-export async function getThreadDetail(threadId: string): Promise<{ messages: UiMessage[]; inProgress: boolean }> {
+export async function getThreadDetail(threadId: string): Promise<{ messages: UiMessage[]; inProgress: boolean; activeTurnId: string }> {
   try {
     return await getThreadDetailV2(threadId)
   } catch (error) {
@@ -331,7 +334,7 @@ export async function startThreadTurn(
   effort?: ReasoningEffort,
   skills?: Array<{ name: string; path: string }>,
   fileAttachments: FileAttachmentParam[] = [],
-): Promise<void> {
+): Promise<string> {
   try {
     const finalText = buildTextWithAttachments(text, fileAttachments)
     const input: Array<Record<string, unknown>> = [{ type: 'text', text: finalText }]
@@ -361,7 +364,8 @@ export async function startThreadTurn(
     if (typeof effort === 'string' && effort.length > 0) {
       params.effort = effort
     }
-    await callRpc('turn/start', params)
+    const payload = await callRpc<{ turn?: Turn }>('turn/start', params)
+    return typeof payload?.turn?.id === 'string' ? payload.turn.id.trim() : ''
   } catch (error) {
     throw normalizeCodexApiError(error, `Failed to start turn for thread ${threadId}`, 'turn/start')
   }

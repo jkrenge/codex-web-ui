@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useMobile } from '../../composables/useMobile'
 
 const props = withDefaults(
@@ -56,8 +56,6 @@ const MAX_SIDEBAR_WIDTH = 620
 const DEFAULT_SIDEBAR_WIDTH = 320
 const KANBAN_SIDEBAR_WIDTH_MULTIPLIER = 4
 const MIN_MAIN_WIDTH = 360
-const DEFAULT_LAYOUT_HEIGHT = '100dvh'
-const DEFAULT_LAYOUT_WIDTH = 1440
 
 function clampSidebarWidth(value: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value))
@@ -72,22 +70,6 @@ function loadSidebarWidth(): number {
 }
 
 const sidebarWidth = ref(loadSidebarWidth())
-const layoutHeight = ref(DEFAULT_LAYOUT_HEIGHT)
-const layoutWidth = ref(DEFAULT_LAYOUT_WIDTH)
-
-function readLayoutHeight(): string {
-  if (typeof window === 'undefined') return DEFAULT_LAYOUT_HEIGHT
-  const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-  return `${Math.max(Math.round(viewportHeight), 0)}px`
-}
-
-function readLayoutWidth(): number {
-  if (typeof window === 'undefined') return DEFAULT_LAYOUT_WIDTH
-  const viewportWidth = window.visualViewport?.width ?? window.innerWidth
-  return Math.max(Math.round(viewportWidth), MIN_SIDEBAR_WIDTH)
-}
-
-let layoutHeightFrame = 0
 
 const sidebarWidthScale = computed(() => (props.isKanbanSidebar ? KANBAN_SIDEBAR_WIDTH_MULTIPLIER : 1))
 
@@ -95,36 +77,21 @@ const effectiveSidebarWidth = computed(() => {
   const preferredWidth = Math.round(sidebarWidth.value * sidebarWidthScale.value)
   if (!props.isKanbanSidebar) return preferredWidth
 
-  const maxAvailableWidth = Math.max(MIN_SIDEBAR_WIDTH, layoutWidth.value - MIN_MAIN_WIDTH)
+  const layoutWidth = typeof window !== 'undefined'
+    ? Math.max(Math.round(window.innerWidth), MIN_SIDEBAR_WIDTH)
+    : 1440
+  const maxAvailableWidth = Math.max(MIN_SIDEBAR_WIDTH, layoutWidth - MIN_MAIN_WIDTH)
   return Math.min(preferredWidth, maxAvailableWidth)
 })
 
-function syncLayoutMetrics(): void {
-  layoutHeight.value = readLayoutHeight()
-  layoutWidth.value = readLayoutWidth()
-}
-
-function scheduleLayoutHeightSync(): void {
-  if (layoutHeightFrame) return
-  layoutHeightFrame = window.requestAnimationFrame(() => {
-    layoutHeightFrame = 0
-    syncLayoutMetrics()
-  })
-}
-
 const layoutStyle = computed(() => {
-  const baseStyle = {
-    '--layout-height': layoutHeight.value,
-  }
   if (isMobile.value || props.isSidebarCollapsed) {
     return {
-      ...baseStyle,
       '--sidebar-width': '0px',
       '--layout-columns': 'minmax(0, 1fr)',
     }
   }
   return {
-    ...baseStyle,
     '--sidebar-width': `${effectiveSidebarWidth.value}px`,
     '--layout-columns': 'var(--sidebar-width) 1px minmax(0, 1fr)',
   }
@@ -154,23 +121,6 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
 }
-
-onMounted(() => {
-  syncLayoutMetrics()
-  window.addEventListener('resize', scheduleLayoutHeightSync)
-  window.visualViewport?.addEventListener('resize', scheduleLayoutHeightSync)
-  window.visualViewport?.addEventListener('scroll', scheduleLayoutHeightSync)
-})
-
-onUnmounted(() => {
-  if (layoutHeightFrame) {
-    cancelAnimationFrame(layoutHeightFrame)
-    layoutHeightFrame = 0
-  }
-  window.removeEventListener('resize', scheduleLayoutHeightSync)
-  window.visualViewport?.removeEventListener('resize', scheduleLayoutHeightSync)
-  window.visualViewport?.removeEventListener('scroll', scheduleLayoutHeightSync)
-})
 </script>
 
 <style scoped>
@@ -180,16 +130,7 @@ onUnmounted(() => {
   @apply grid bg-slate-100 text-slate-900 overflow-hidden;
   height: 100vh;
   height: 100dvh;
-  height: var(--layout-height, 100dvh);
-  max-height: var(--layout-height, 100dvh);
   grid-template-columns: var(--layout-columns);
-}
-
-.desktop-layout.is-mobile {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  overscroll-behavior-y: none;
 }
 
 .desktop-sidebar {
@@ -207,7 +148,6 @@ onUnmounted(() => {
 
 .desktop-main {
   @apply bg-white min-h-0 overflow-y-hidden overflow-x-visible;
-  overscroll-behavior-y: none;
 }
 
 .mobile-drawer-backdrop {

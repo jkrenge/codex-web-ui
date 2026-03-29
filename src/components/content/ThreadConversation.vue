@@ -424,7 +424,6 @@ const modalImageUrl = ref('')
 const fileLinkContextMenuRef = ref<HTMLElement | null>(null)
 const toolQuestionAnswers = ref<Record<string, string>>({})
 const toolQuestionOtherAnswers = ref<Record<string, string>>({})
-const localScrollState = ref<ThreadScrollState | null>(null)
 const BOTTOM_THRESHOLD_PX = 16
 type InlineSegment =
   | { kind: 'text'; value: string }
@@ -439,7 +438,6 @@ type MessageBlock =
 let scrollRestoreFrame = 0
 let bottomLockFrame = 0
 let bottomLockFramesLeft = 0
-let pendingSavedScrollRestore = true
 const trackedPendingImages = new WeakSet<HTMLImageElement>()
 const failedMarkdownImageKeys = ref<Set<string>>(new Set())
 const isFileLinkContextMenuVisible = ref(false)
@@ -454,6 +452,11 @@ type ParsedToolQuestion = {
   question: string
   isOther: boolean
   options: string[]
+}
+
+type TextRange = {
+  start: number
+  end: number
 }
 
 function isFilePath(value: string): boolean {
@@ -803,15 +806,43 @@ function splitTextByFileUrls(text: string): InlineSegment[] {
   return segments
 }
 
+function collectMarkdownLinkRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = []
+  let cursor = 0
+
+  while (cursor < text.length) {
+    const openBracket = text.indexOf('[', cursor)
+    if (openBracket < 0) break
+    const markdownToken = readMarkdownLinkAt(text, openBracket)
+    if (!markdownToken) {
+      cursor = openBracket + 1
+      continue
+    }
+    ranges.push({ start: openBracket, end: markdownToken.end })
+    cursor = markdownToken.end
+  }
+
+  return ranges
+}
+
+function isIndexInsideRanges(index: number, ranges: TextRange[]): boolean {
+  for (const range of ranges) {
+    if (index < range.start) return false
+    if (index < range.end) return true
+  }
+  return false
+}
+
 function parseInlineSegments(text: string): InlineSegment[] {
   if (!text.includes('`')) return splitTextByFileUrls(text)
+  const markdownLinkRanges = collectMarkdownLinkRanges(text)
 
   const segments: InlineSegment[] = []
   let cursor = 0
   let textStart = 0
 
   while (cursor < text.length) {
-    if (text[cursor] !== '`') {
+    if (text[cursor] !== '`' || isIndexInsideRanges(cursor, markdownLinkRanges)) {
       cursor += 1
       continue
     }
@@ -827,6 +858,10 @@ function parseInlineSegments(text: string): InlineSegment[] {
     while (searchFrom < text.length) {
       const candidate = text.indexOf(delimiter, searchFrom)
       if (candidate < 0) break
+      if (isIndexInsideRanges(candidate, markdownLinkRanges)) {
+        searchFrom = candidate + 1
+        continue
+      }
 
       const hasBacktickBefore = candidate > 0 && text[candidate - 1] === '`'
       const hasBacktickAfter =
@@ -1288,27 +1323,17 @@ function isAtBottom(container: HTMLElement): boolean {
   return distance <= BOTTOM_THRESHOLD_PX
 }
 
-function readScrollState(container: HTMLElement): ThreadScrollState {
+function emitScrollState(container: HTMLElement): void {
+  if (!props.activeThreadId) return
   const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0)
   const scrollRatio = maxScrollTop > 0 ? Math.min(Math.max(container.scrollTop / maxScrollTop, 0), 1) : 1
-  return {
-    scrollTop: container.scrollTop,
-    isAtBottom: isAtBottom(container),
-    scrollRatio,
-  }
-}
-
-function resolveScrollState(): ThreadScrollState | null {
-  return localScrollState.value ?? props.scrollState
-}
-
-function emitScrollState(container: HTMLElement): void {
-  const nextState = readScrollState(container)
-  localScrollState.value = nextState
-  if (!props.activeThreadId) return
   emit('updateScrollState', {
     threadId: props.activeThreadId,
-    state: nextState,
+    state: {
+      scrollTop: container.scrollTop,
+      isAtBottom: isAtBottom(container),
+      scrollRatio,
+    },
   })
 }
 
@@ -1316,15 +1341,17 @@ function applySavedScrollState(): void {
   const container = conversationListRef.value
   if (!container) return
 
-  const savedState = resolveScrollState()
+  const savedState = props.scrollState
   if (!savedState || savedState.isAtBottom) {
     enforceBottomState()
     return
   }
 
   const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0)
-  // Preserve the user's absolute reading position when new content streams in below.
-  const targetScrollTop = savedState.scrollTop
+  const targetScrollTop =
+    typeof savedState.scrollRatio === 'number'
+      ? savedState.scrollRatio * maxScrollTop
+      : savedState.scrollTop
   container.scrollTop = Math.min(Math.max(targetScrollTop, 0), maxScrollTop)
   emitScrollState(container)
 }
@@ -1337,7 +1364,7 @@ function enforceBottomState(): void {
 }
 
 function shouldLockToBottom(): boolean {
-  const savedState = resolveScrollState()
+  const savedState = props.scrollState
   return !savedState || savedState.isAtBottom === true
 }
 
@@ -1385,23 +1412,14 @@ function bindPendingImageHandlers(): void {
   }
 }
 
-async function scheduleScrollRestore(options: { restoreSavedState?: boolean } = {}): Promise<void> {
-  const shouldRestoreSavedState = options.restoreSavedState ?? pendingSavedScrollRestore
+async function scheduleScrollRestore(): Promise<void> {
   await nextTick()
   if (scrollRestoreFrame) {
     cancelAnimationFrame(scrollRestoreFrame)
   }
   scrollRestoreFrame = requestAnimationFrame(() => {
     scrollRestoreFrame = 0
-    const container = conversationListRef.value
-    if (shouldRestoreSavedState) {
-      applySavedScrollState()
-      pendingSavedScrollRestore = false
-    } else if (shouldLockToBottom()) {
-      enforceBottomState()
-    } else if (container) {
-      emitScrollState(container)
-    }
+    applySavedScrollState()
     bindPendingImageHandlers()
     scheduleBottomLock()
   })
@@ -1429,11 +1447,10 @@ watch(
 watch(
   () => props.liveOverlay,
   async (overlay) => {
-    if (!overlay) {
-      await scheduleScrollRestore()
-      return
-    }
-    await scheduleScrollRestore()
+    if (!overlay) return
+    await nextTick()
+    enforceBottomState()
+    scheduleBottomLock(8)
   },
   { deep: true },
 )
@@ -1442,19 +1459,16 @@ watch(
   () => props.isLoading,
   async (loading) => {
     if (loading) return
-    await scheduleScrollRestore({ restoreSavedState: true })
+    await scheduleScrollRestore()
   },
 )
 
 watch(
   () => props.activeThreadId,
-  async () => {
-    pendingSavedScrollRestore = true
-    localScrollState.value = null
+  () => {
     modalImageUrl.value = ''
     closeFileLinkContextMenu()
     failedMarkdownImageKeys.value = new Set()
-    await scheduleScrollRestore({ restoreSavedState: true })
   },
   { flush: 'post' },
 )
@@ -1545,7 +1559,6 @@ onBeforeUnmount(() => {
 
 .conversation-list {
   @apply h-full min-h-0 list-none m-0 px-2 sm:px-6 py-0 overflow-y-auto overflow-x-visible flex flex-col gap-2 sm:gap-3;
-  overscroll-behavior-y: contain;
 }
 
 .conversation-item {
