@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { writeFile } from 'node:fs/promises'
-import { createKanbanBoardStore, isKanbanStatus, type KanbanLiveThread } from './kanbanBoardStore.js'
+import { createKanbanBoardStore, isKanbanBoard, isKanbanStatus, type KanbanLiveThread } from './kanbanBoardStore.js'
 import { handleSkillsRoutes, initializeSkillsSyncOnStartup } from './skillsRoutes.js'
 import { TelegramThreadBridge } from './telegramThreadBridge.js'
 import { getSpawnInvocation } from '../utils/commandInvocation.js'
@@ -2022,6 +2022,11 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         }
 
         const payload = asRecord(await readJsonBody(req))
+        const board = payload?.board
+        if (board !== undefined && !isKanbanBoard(board)) {
+          setJson(res, 400, { error: 'Invalid board' })
+          return
+        }
         const status = payload?.status
         if (status !== undefined && !isKanbanStatus(status)) {
           setJson(res, 400, { error: 'Invalid status' })
@@ -2033,6 +2038,7 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
         try {
           const item = await kanbanBoardStore.updateThread({
             threadId,
+            board,
             status,
             lanePosition: typeof payload?.lanePosition === 'number' ? payload.lanePosition : undefined,
             snapshot: snapshot

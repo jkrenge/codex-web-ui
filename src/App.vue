@@ -151,6 +151,31 @@
               @start-new-thread="onStartNewThreadFromToolbar"
             />
           </template>
+          <template #actions>
+            <div
+              v-if="selectedThread && !isHomeRoute && !isSkillsRoute"
+              class="content-header-thread-markers"
+            >
+              <button
+                class="content-header-thread-marker-button"
+                :data-active="selectedThreadTitleInfo.marker === 'pending'"
+                type="button"
+                :aria-pressed="selectedThreadTitleInfo.marker === 'pending'"
+                @click="onToggleSelectedThreadMarker('pending')"
+              >
+                Pending
+              </button>
+              <button
+                class="content-header-thread-marker-button"
+                :data-active="selectedThreadTitleInfo.marker === 'review'"
+                type="button"
+                :aria-pressed="selectedThreadTitleInfo.marker === 'review'"
+                @click="onToggleSelectedThreadMarker('review')"
+              >
+                Waiting for review
+              </button>
+            </div>
+          </template>
         </ContentHeader>
 
         <section class="content-body">
@@ -323,10 +348,11 @@ import {
   openProjectRoot,
   searchThreads,
 } from './api/codexGateway'
-import type { KanbanStatus, ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
+import type { KanbanBoard, KanbanStatus, ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { GithubTipsScope, GithubTrendingProject, TelegramStatus } from './api/codexGateway'
 import { getPathLeafName, getPathParent } from './pathUtils.js'
+import { getManagedThreadTitleInfo, toggleManagedThreadTitleMarker, type ManagedThreadTitleMarker } from './threadTitleMarkers'
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
 const THREAD_VIEW_MODE_STORAGE_KEY = 'codex-web-local.thread-view-mode.v1'
@@ -568,17 +594,18 @@ const knownThreadIdSet = computed(() => {
 
 const isHomeRoute = computed(() => route.name === 'home')
 const isSkillsRoute = computed(() => route.name === 'skills')
+const selectedThreadTitleInfo = computed(() => getManagedThreadTitleInfo(selectedThread.value?.title ?? ''))
 const contentTitle = computed(() => {
   if (isSkillsRoute.value) return 'Skills'
   if (isHomeRoute.value) return 'New thread'
-  return selectedThread.value?.title ?? 'Choose a thread'
+  return selectedThreadTitleInfo.value.displayTitle || selectedThread.value?.title || 'Choose a thread'
 })
 const browserHostName =
   typeof window !== 'undefined'
     ? (window.location.hostname || window.location.host || 'codexui')
     : 'codexui'
 const pageTitle = computed(() => {
-  const threadTitle = selectedThread.value?.title?.trim() ?? ''
+  const threadTitle = selectedThreadTitleInfo.value.displayTitle.trim()
   return threadTitle || browserHostName
 })
 const filteredMessages = computed(() =>
@@ -766,8 +793,11 @@ function onArchiveThread(threadId: string): void {
   void archiveThreadById(threadId)
 }
 
-function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus }): void {
-  void setThreadKanbanStatusById(payload.threadId, payload.status)
+function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus; board?: KanbanBoard }): void {
+  void setThreadKanbanStatusById(payload.threadId, {
+    status: payload.status,
+    board: payload.board,
+  })
 }
 
 function onSidebarThreadViewModeChange(mode: SidebarThreadViewMode): void {
@@ -842,6 +872,15 @@ function onRenameProject(payload: { projectName: string; displayName: string }):
 
 function onRenameThread(payload: { threadId: string; title: string }): void {
   void renameThreadById(payload.threadId, payload.title)
+}
+
+function onToggleSelectedThreadMarker(marker: ManagedThreadTitleMarker): void {
+  const thread = selectedThread.value
+  if (!thread) return
+
+  const nextTitle = toggleManagedThreadTitleMarker(thread.title, marker).trim()
+  if (!nextTitle) return
+  void renameThreadById(thread.id, nextTitle)
 }
 
 function onRemoveProject(projectName: string): void {
@@ -1682,6 +1721,18 @@ async function submitFirstMessageForNewThread(
 
 .content-thread {
   @apply flex-1 min-h-0;
+}
+
+.content-header-thread-markers {
+  @apply flex items-center gap-2;
+}
+
+.content-header-thread-marker-button {
+  @apply inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900;
+}
+
+.content-header-thread-marker-button[data-active='true'] {
+  @apply border-blue-500 text-blue-700 bg-blue-50/40;
 }
 
 .composer-with-queue {

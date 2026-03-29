@@ -2,8 +2,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { toProjectName } from '../pathUtils.js'
 
+export const KANBAN_BOARDS = ['primary', 'implementation'] as const
 export const KANBAN_STATUSES = ['backlog', 'in_progress', 'review', 'closed_followup', 'archived'] as const
 
+export type KanbanBoard = typeof KANBAN_BOARDS[number]
 export type KanbanStatus = typeof KANBAN_STATUSES[number]
 
 export type KanbanThreadSnapshot = {
@@ -14,6 +16,7 @@ export type KanbanThreadSnapshot = {
 
 export type KanbanBoardItem = {
   threadId: string
+  board: KanbanBoard
   status: KanbanStatus
   lanePosition: number
   createdAt: string
@@ -40,6 +43,7 @@ export type KanbanLiveThread = {
 
 export type KanbanThreadUpdate = {
   threadId: string
+  board?: KanbanBoard
   status?: KanbanStatus
   lanePosition?: number
   snapshot?: Partial<KanbanThreadSnapshot>
@@ -94,6 +98,7 @@ function normalizeBoardItem(threadId: string, value: unknown): KanbanBoardItem |
 
   return {
     threadId: normalizedThreadId,
+    board: isKanbanBoard(record.board) ? record.board : 'primary',
     status: isKanbanStatus(record.status) ? record.status : 'backlog',
     lanePosition: typeof record.lanePosition === 'number' && Number.isFinite(record.lanePosition) ? record.lanePosition : 0,
     createdAt: normalizeIsoString(record.createdAt, createdAtFallback),
@@ -157,6 +162,7 @@ function buildThreadItem(thread: KanbanLiveThread, nowIso: string): KanbanBoardI
   const fallbackPosition = thread.updatedAtMs || thread.createdAtMs || Date.now()
   return {
     threadId: thread.threadId,
+    board: 'primary',
     status: 'backlog',
     lanePosition: fallbackPosition,
     createdAt: nowIso,
@@ -236,26 +242,32 @@ function updateBoardItem(state: KanbanBoardState, update: KanbanThreadUpdate): {
   )
 
   const nextStatus = update.status ?? existing?.status ?? 'backlog'
+  const nextBoard = update.board ?? existing?.board ?? 'primary'
   const nextLanePosition =
     typeof update.lanePosition === 'number' && Number.isFinite(update.lanePosition)
       ? update.lanePosition
-      : update.status && update.status !== existing?.status
+      : (update.status && update.status !== existing?.status) || (update.board && update.board !== existing?.board)
         ? Date.now()
         : existing?.lanePosition ?? Date.now()
 
   const nextItem: KanbanBoardItem = {
     threadId: normalizedThreadId,
+    board: nextBoard,
     status: nextStatus,
     lanePosition: nextLanePosition,
     createdAt: existing?.createdAt ?? nowIso,
     updatedAt: nowIso,
-    lastMovedAt: update.status && update.status !== existing?.status ? nowIso : (existing?.lastMovedAt ?? nowIso),
+    lastMovedAt:
+      (update.status && update.status !== existing?.status) || (update.board && update.board !== existing?.board)
+        ? nowIso
+        : (existing?.lastMovedAt ?? nowIso),
     archivedAt: nextStatus === 'archived' ? nowIso : null,
     snapshot,
   }
 
   const changed =
     !existing ||
+    existing.board !== nextItem.board ||
     existing.status !== nextItem.status ||
     existing.lanePosition !== nextItem.lanePosition ||
     existing.archivedAt !== nextItem.archivedAt ||
@@ -297,6 +309,10 @@ async function writeBoardState(statePath: string, state: KanbanBoardState): Prom
 
 export function isKanbanStatus(value: unknown): value is KanbanStatus {
   return typeof value === 'string' && (KANBAN_STATUSES as readonly string[]).includes(value)
+}
+
+export function isKanbanBoard(value: unknown): value is KanbanBoard {
+  return typeof value === 'string' && (KANBAN_BOARDS as readonly string[]).includes(value)
 }
 
 export function createKanbanBoardStore(options: KanbanBoardStoreOptions) {

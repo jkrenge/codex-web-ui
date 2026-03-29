@@ -32,6 +32,7 @@ import {
   type SkillInfo,
 } from '../api/codexGateway'
 import type {
+  KanbanBoard,
   KanbanStatus,
   CommandExecutionData,
   ReasoningEffort,
@@ -63,9 +64,11 @@ const REASONING_EFFORT_OPTIONS: ReasoningEffort[] = ['none', 'minimal', 'low', '
 const GLOBAL_SERVER_REQUEST_SCOPE = '__global__'
 const MODEL_FALLBACK_ID = 'gpt-5.2-codex'
 const AUTO_COMMIT_MESSAGE_FALLBACK = 'Auto-commit from Codex rollback chat turn'
+const DEFAULT_KANBAN_BOARD: KanbanBoard = 'primary'
 const DEFAULT_KANBAN_STATUS: KanbanStatus = 'backlog'
 
 type KanbanThreadState = {
+  board: KanbanBoard
   status: KanbanStatus
   lanePosition: number
 }
@@ -528,6 +531,7 @@ function areThreadFieldsEqual(first: UiThread, second: UiThread): boolean {
     first.preview === second.preview &&
     first.unread === second.unread &&
     first.inProgress === second.inProgress &&
+    first.kanbanBoard === second.kanbanBoard &&
     first.kanbanStatus === second.kanbanStatus &&
     first.kanbanPosition === second.kanbanPosition
   )
@@ -606,6 +610,7 @@ function updateThreadKanbanStateInGroups(
 
       const nextThread: UiThread = {
         ...thread,
+        kanbanBoard: nextState.board,
         kanbanStatus: nextState.status,
         kanbanPosition: nextState.lanePosition,
       }
@@ -1076,6 +1081,7 @@ export function useDesktopState() {
       return persisted
     }
     return {
+      board: thread.kanbanBoard || DEFAULT_KANBAN_BOARD,
       status: thread.kanbanStatus || DEFAULT_KANBAN_STATUS,
       lanePosition: Number.isFinite(thread.kanbanPosition) ? thread.kanbanPosition : getDefaultKanbanPosition(thread),
     }
@@ -1105,6 +1111,7 @@ export function useDesktopState() {
               ...thread,
               inProgress,
               unread,
+              kanbanBoard: kanban.board,
               kanbanStatus: kanban.status,
               kanbanPosition: kanban.lanePosition,
             }
@@ -1130,6 +1137,7 @@ export function useDesktopState() {
       preview: firstMessageText,
       unread: false,
       inProgress: false,
+      kanbanBoard: DEFAULT_KANBAN_BOARD,
       kanbanStatus: DEFAULT_KANBAN_STATUS,
       kanbanPosition: Date.now(),
     }
@@ -2254,6 +2262,7 @@ export function useDesktopState() {
         const nextKanbanState: Record<string, KanbanThreadState> = {}
         for (const item of Object.values(kanbanBoard.itemsByThreadId)) {
           nextKanbanState[item.threadId] = {
+            board: item.board,
             status: item.status,
             lanePosition: item.lanePosition,
           }
@@ -2396,17 +2405,27 @@ export function useDesktopState() {
     }
   }
 
-  async function setThreadKanbanStatusById(threadId: string, status: KanbanStatus) {
+  async function setThreadKanbanStatusById(
+    threadId: string,
+    next: {
+      status: KanbanStatus
+      board?: KanbanBoard
+    },
+  ) {
     const normalizedThreadId = threadId.trim()
     if (!normalizedThreadId) return
 
     const thread = flattenThreads(sourceGroups.value).find((row) => row.id === normalizedThreadId)
     const previousState = kanbanStateByThreadId.value[normalizedThreadId]
     const previousSourceGroups = sourceGroups.value
+    const nextBoard = next.board ?? previousState?.board ?? thread?.kanbanBoard ?? DEFAULT_KANBAN_BOARD
+    const shouldReposition =
+      next.status !== previousState?.status || nextBoard !== previousState?.board
     const optimisticState: KanbanThreadState = {
-      status,
+      board: nextBoard,
+      status: next.status,
       lanePosition:
-        status !== previousState?.status
+        shouldReposition
           ? Date.now()
           : previousState?.lanePosition ?? thread?.kanbanPosition ?? Date.now(),
     }
@@ -2421,7 +2440,8 @@ export function useDesktopState() {
 
     try {
       const persisted = await persistThreadKanbanStatus(normalizedThreadId, {
-        status,
+        board: nextBoard,
+        status: next.status,
         lanePosition: optimisticState.lanePosition,
         snapshot: thread
           ? {
@@ -2435,11 +2455,13 @@ export function useDesktopState() {
       kanbanStateByThreadId.value = {
         ...kanbanStateByThreadId.value,
         [normalizedThreadId]: {
+          board: persisted.board,
           status: persisted.status,
           lanePosition: persisted.lanePosition,
         },
       }
       sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, {
+        board: persisted.board,
         status: persisted.status,
         lanePosition: persisted.lanePosition,
       })

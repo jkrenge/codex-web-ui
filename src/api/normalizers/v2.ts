@@ -218,6 +218,7 @@ function toUiThread(summary: Thread): UiThread {
     preview: summary.preview,
     unread: false,
     inProgress: readThreadInProgress(summary),
+    kanbanBoard: 'primary',
     kanbanStatus: 'backlog',
     kanbanPosition: Math.max(0, summary.updatedAt * 1000),
   }

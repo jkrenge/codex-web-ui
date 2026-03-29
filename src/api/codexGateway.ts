@@ -21,7 +21,7 @@ import {
   normalizeThreadMessagesV2,
   readThreadInProgressFromResponse,
 } from './normalizers/v2'
-import type { KanbanStatus, SpeedMode, UiMessage, UiProjectGroup } from '../types/codex'
+import type { KanbanBoard, KanbanStatus, SpeedMode, UiMessage, UiProjectGroup } from '../types/codex'
 import { normalizePathForUi } from '../pathUtils.js'
 
 type CurrentModelConfig = {
@@ -69,6 +69,7 @@ export type KanbanBoardSnapshot = {
 
 export type KanbanBoardItem = {
   threadId: string
+  board: KanbanBoard
   status: KanbanStatus
   lanePosition: number
   createdAt: string
@@ -649,6 +650,10 @@ function isKanbanStatus(value: string): value is KanbanStatus {
   return ['backlog', 'in_progress', 'review', 'closed_followup', 'archived'].includes(value)
 }
 
+function isKanbanBoard(value: string): value is KanbanBoard {
+  return ['primary', 'implementation'].includes(value)
+}
+
 function normalizeKanbanBoardSnapshot(value: unknown): KanbanBoardSnapshot {
   const record =
     value && typeof value === 'object' && !Array.isArray(value)
@@ -669,13 +674,15 @@ function normalizeKanbanBoardItem(value: unknown): KanbanBoardItem | null {
   if (!record) return null
 
   const threadId = typeof record.threadId === 'string' ? record.threadId.trim() : ''
+  const board = typeof record.board === 'string' ? record.board : ''
   const status = typeof record.status === 'string' ? record.status : ''
-  if (!threadId || !isKanbanStatus(status)) {
+  if (!threadId || !isKanbanBoard(board) || !isKanbanStatus(status)) {
     return null
   }
 
   return {
     threadId,
+    board,
     status,
     lanePosition: typeof record.lanePosition === 'number' && Number.isFinite(record.lanePosition)
       ? record.lanePosition
@@ -731,6 +738,7 @@ export async function getKanbanBoardState(): Promise<KanbanBoardState> {
 export async function setThreadKanbanStatus(
   threadId: string,
   payload: {
+    board?: KanbanBoard
     status: KanbanStatus
     lanePosition?: number
     snapshot?: Partial<KanbanBoardSnapshot>
