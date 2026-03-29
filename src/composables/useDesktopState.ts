@@ -1128,6 +1128,7 @@ export function useDesktopState() {
     const projectName = toProjectName(normalizedCwd)
     const nextThread: UiThread = {
       id: threadId,
+      backend: 'codex',
       title: toOptimisticThreadTitle(firstMessageText),
       projectName,
       cwd: normalizedCwd,

@@ -209,6 +209,7 @@ function toUiThread(summary: Thread): UiThread {
 
   return {
     id: summary.id,
+    backend: 'codex' as const,
     title: toThreadTitle(summary),
     projectName: toProjectName(cwd),
     cwd,
