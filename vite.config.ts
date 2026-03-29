@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { createCodexBridgeMiddleware } from "./src/server/codexAppServerBridge";
+import { createClaudeBridgeMiddleware } from "./src/server/claudeCodeBridge";
 import { createDirectoryListingHtml, createTextEditorHtml, decodeBrowsePath, isTextEditableFile, normalizeLocalPath } from "./src/server/localBrowseUi";
 import tailwindcss from "@tailwindcss/vite";
 import { spawnSync } from "node:child_process";
@@ -105,6 +106,7 @@ export default defineConfig({
       name: "codex-bridge",
       configureServer(server) {
         const bridge = createCodexBridgeMiddleware();
+        const claudeBridge = createClaudeBridgeMiddleware();
         const httpServer = server.httpServer;
         if (httpServer) {
           const hostScope = httpServer as typeof httpServer & {
@@ -130,13 +132,21 @@ export default defineConfig({
                   atIso: new Date().toISOString(),
                 }),
               );
-              const unsubscribe = bridge.subscribeNotifications((notification) => {
+              const unsubCodex = bridge.subscribeNotifications((notification) => {
+                if (ws.readyState !== ws.OPEN) return;
+                ws.send(JSON.stringify(notification));
+              });
+              const unsubClaude = claudeBridge.subscribeNotifications((notification) => {
                 if (ws.readyState !== ws.OPEN) return;
                 ws.send(JSON.stringify(notification));
               });
 
-              ws.on("close", unsubscribe);
-              ws.on("error", unsubscribe);
+              const cleanup = () => {
+                unsubCodex();
+                unsubClaude();
+              };
+              ws.on("close", cleanup);
+              ws.on("error", cleanup);
             });
 
             httpServer.once("close", () => {
@@ -309,8 +319,10 @@ export default defineConfig({
           });
         });
         server.middlewares.use(bridge);
+        server.middlewares.use(claudeBridge);
         server.httpServer?.once("close", () => {
           bridge.dispose();
+          claudeBridge.dispose();
         });
       },
     },

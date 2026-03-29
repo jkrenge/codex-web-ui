@@ -1,5 +1,9 @@
 <template>
-  <DesktopLayout :is-sidebar-collapsed="isSidebarCollapsed" @close-sidebar="setSidebarCollapsed(true)">
+  <DesktopLayout
+    :is-sidebar-collapsed="isSidebarCollapsed"
+    :is-kanban-sidebar="sidebarThreadViewMode === 'kanban'"
+    @close-sidebar="setSidebarCollapsed(true)"
+  >
     <template #sidebar>
       <section class="sidebar-root">
         <div class="sidebar-scrollable">
@@ -62,6 +66,7 @@
             @select="onSelectThread"
             @archive="onArchiveThread" @start-new-thread="onStartNewThread" @rename-project="onRenameProject"
             @set-kanban-status="onSetThreadKanbanStatus"
+            @thread-view-mode-change="onSidebarThreadViewModeChange"
             @browse-thread-files="onBrowseThreadFiles"
             @rename-thread="onRenameThread"
             @fork-thread="onForkThread"
@@ -145,6 +150,31 @@
               @toggle-sidebar="setSidebarCollapsed(!isSidebarCollapsed)"
               @start-new-thread="onStartNewThreadFromToolbar"
             />
+          </template>
+          <template #actions>
+            <div
+              v-if="selectedThread && !isHomeRoute && !isSkillsRoute"
+              class="content-header-thread-markers"
+            >
+              <button
+                class="content-header-thread-marker-button"
+                :data-active="selectedThreadTitleInfo.marker === 'pending'"
+                type="button"
+                :aria-pressed="selectedThreadTitleInfo.marker === 'pending'"
+                @click="onToggleSelectedThreadMarker('pending')"
+              >
+                Pending
+              </button>
+              <button
+                class="content-header-thread-marker-button"
+                :data-active="selectedThreadTitleInfo.marker === 'review'"
+                type="button"
+                :aria-pressed="selectedThreadTitleInfo.marker === 'review'"
+                @click="onToggleSelectedThreadMarker('review')"
+              >
+                Waiting for review
+              </button>
+            </div>
           </template>
         </ContentHeader>
 
@@ -234,10 +264,13 @@
                 :dictation-click-to-toggle="dictationClickToToggle" :dictation-auto-send="dictationAutoSend"
                 :prepend-draft-request="rollbackDraftPrependRequest"
                 :dictation-language="dictationLanguage"
+                :is-new-thread="!selectedThreadId"
+                :new-thread-backend="newThreadBackend"
                 @submit="onSubmitThreadMessage"
                 @update:selected-model="onSelectModel"
                 @update:selected-reasoning-effort="onSelectReasoningEffort"
-                @update:selected-speed-mode="onSelectSpeedMode" />
+                @update:selected-speed-mode="onSelectSpeedMode"
+                @update:new-thread-backend="newThreadBackend = $event" />
             </div>
           </template>
           <template v-else>
@@ -318,12 +351,14 @@ import {
   openProjectRoot,
   searchThreads,
 } from './api/codexGateway'
-import type { KanbanStatus, ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
+import type { KanbanBoard, KanbanStatus, ReasoningEffort, SpeedMode, ThreadScrollState } from './types/codex'
 import type { ComposerDraftPayload, ThreadComposerExposed } from './components/content/ThreadComposer.vue'
 import type { GithubTipsScope, GithubTrendingProject, TelegramStatus } from './api/codexGateway'
 import { getPathLeafName, getPathParent } from './pathUtils.js'
+import { getManagedThreadTitleInfo, toggleManagedThreadTitleMarker, type ManagedThreadTitleMarker } from './threadTitleMarkers'
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'codex-web-local.sidebar-collapsed.v1'
+const THREAD_VIEW_MODE_STORAGE_KEY = 'codex-web-local.thread-view-mode.v1'
 const worktreeName = import.meta.env.VITE_WORKTREE_NAME ?? 'unknown'
 const appVersion = import.meta.env.VITE_APP_VERSION ?? 'unknown'
 const SETTINGS_HELP = {
@@ -484,6 +519,7 @@ const {
   removeProject,
   reorderProject,
   pinProjectToTop,
+  newThreadBackend,
   startPolling,
   stopPolling,
 } = useDesktopState()
@@ -491,6 +527,7 @@ const {
 const route = useRoute()
 const router = useRouter()
 const { isMobile } = useMobile()
+type SidebarThreadViewMode = 'project' | 'chronological' | 'kanban'
 const homeThreadComposerRef = ref<ThreadComposerExposed | null>(null)
 const threadComposerRef = ref<ThreadComposerExposed | null>(null)
 const trendingProjects = ref<GithubTrendingProject[]>([])
@@ -508,6 +545,7 @@ const worktreeInitStatus = ref<{ phase: 'idle' | 'running' | 'error'; title: str
   message: '',
 })
 const isSidebarCollapsed = ref(loadSidebarCollapsed())
+const sidebarThreadViewMode = ref<SidebarThreadViewMode>(loadSidebarThreadViewMode())
 const sidebarSearchQuery = ref('')
 const isSidebarSearchVisible = ref(false)
 const sidebarSearchInputRef = ref<HTMLInputElement | null>(null)
@@ -560,17 +598,18 @@ const knownThreadIdSet = computed(() => {
 
 const isHomeRoute = computed(() => route.name === 'home')
 const isSkillsRoute = computed(() => route.name === 'skills')
+const selectedThreadTitleInfo = computed(() => getManagedThreadTitleInfo(selectedThread.value?.title ?? ''))
 const contentTitle = computed(() => {
   if (isSkillsRoute.value) return 'Skills'
   if (isHomeRoute.value) return 'New thread'
-  return selectedThread.value?.title ?? 'Choose a thread'
+  return selectedThreadTitleInfo.value.displayTitle || selectedThread.value?.title || 'Choose a thread'
 })
 const browserHostName =
   typeof window !== 'undefined'
     ? (window.location.hostname || window.location.host || 'codexui')
     : 'codexui'
 const pageTitle = computed(() => {
-  const threadTitle = selectedThread.value?.title?.trim() ?? ''
+  const threadTitle = selectedThreadTitleInfo.value.displayTitle.trim()
   return threadTitle || browserHostName
 })
 const filteredMessages = computed(() =>
@@ -758,8 +797,15 @@ function onArchiveThread(threadId: string): void {
   void archiveThreadById(threadId)
 }
 
-function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus }): void {
-  void setThreadKanbanStatusById(payload.threadId, payload.status)
+function onSetThreadKanbanStatus(payload: { threadId: string; status: KanbanStatus; board?: KanbanBoard }): void {
+  void setThreadKanbanStatusById(payload.threadId, {
+    status: payload.status,
+    board: payload.board,
+  })
+}
+
+function onSidebarThreadViewModeChange(mode: SidebarThreadViewMode): void {
+  sidebarThreadViewMode.value = mode
 }
 
 async function onForkThread(threadId: string): Promise<void> {
@@ -830,6 +876,15 @@ function onRenameProject(payload: { projectName: string; displayName: string }):
 
 function onRenameThread(payload: { threadId: string; title: string }): void {
   void renameThreadById(payload.threadId, payload.title)
+}
+
+function onToggleSelectedThreadMarker(marker: ManagedThreadTitleMarker): void {
+  const thread = selectedThread.value
+  if (!thread) return
+
+  const nextTitle = toggleManagedThreadTitleMarker(thread.title, marker).trim()
+  if (!nextTitle) return
+  void renameThreadById(thread.id, nextTitle)
 }
 
 function onRemoveProject(projectName: string): void {
@@ -1225,6 +1280,13 @@ function loadBoolPref(key: string, fallback: boolean): boolean {
   const v = window.localStorage.getItem(key)
   if (v === null) return fallback
   return v === '1'
+}
+
+function loadSidebarThreadViewMode(): SidebarThreadViewMode {
+  if (typeof window === 'undefined') return 'project'
+  const value = window.localStorage.getItem(THREAD_VIEW_MODE_STORAGE_KEY)
+  if (value === 'chronological' || value === 'kanban') return value
+  return 'project'
 }
 
 function loadDarkModePref(): 'system' | 'light' | 'dark' {
@@ -1663,6 +1725,18 @@ async function submitFirstMessageForNewThread(
 
 .content-thread {
   @apply flex-1 min-h-0;
+}
+
+.content-header-thread-markers {
+  @apply flex items-center gap-2;
+}
+
+.content-header-thread-marker-button {
+  @apply inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900;
+}
+
+.content-header-thread-marker-button[data-active='true'] {
+  @apply border-blue-500 text-blue-700 bg-blue-50/40;
 }
 
 .composer-with-queue {

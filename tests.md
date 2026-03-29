@@ -86,6 +86,117 @@ This file tracks manual regression and feature verification steps.
 - Move test threads back to their desired status before archiving them.
 - If a thread was moved to `Archive`, edit `~/.codex/codexapp/kanban-state.json` and change its `status` to another lane, or delete the file to reset the board state.
 
+### Feature: Kanban board drag cards between columns
+
+#### Prerequisites
+- App server is running from this repository.
+- The sidebar is visible in desktop layout.
+- At least one visible thread exists in the `Backlog` lane after switching to `Kanban board`.
+
+#### Steps
+1. Open the sidebar thread organize menu and switch to `Kanban board`.
+2. Drag a thread card from `Backlog` into the `In progress` lane.
+3. Confirm the destination lane highlights while the card is dragged over it.
+4. Drop the card and confirm it disappears from `Backlog` and appears in `In progress`.
+5. Refresh the browser.
+6. Confirm the same thread remains in `In progress`.
+
+#### Expected Results
+- Kanban cards can be dragged between visible columns.
+- The hovered destination lane shows a visual drop state during drag.
+- Dropping a card updates its lane immediately and persists after refresh.
+
+#### Rollback/Cleanup
+- Drag the test card back to its original lane, or move it back with the thread card menu.
+
+### Feature: Kanban board lane changes persist from menu and drag
+
+#### Prerequisites
+- App server is running from this repository.
+- The sidebar is visible in desktop layout with `Kanban board` enabled.
+- At least one visible thread exists in the board.
+- Access to `~/.codex/codexapp/kanban-state.json` on the host machine.
+
+#### Steps
+1. Open a thread card menu and move the card from its current lane to `Review`.
+2. Confirm the card leaves its original lane immediately and appears in `Review`.
+3. Open `~/.codex/codexapp/kanban-state.json` and confirm that thread entry now has `status: "review"`.
+4. Drag the same card from `Review` to `Closed / followup`.
+5. Confirm the card leaves `Review` immediately and appears in `Closed / followup`.
+6. Re-open `~/.codex/codexapp/kanban-state.json` and confirm the same thread entry now has `status: "closed_followup"`.
+7. Refresh the browser and confirm the card remains in `Closed / followup`.
+
+#### Expected Results
+- Menu-based lane changes update the board immediately.
+- Drag-and-drop lane changes update the board immediately.
+- `~/.codex/codexapp/kanban-state.json` matches the latest lane after each move.
+- The card stays in the chosen lane after refresh.
+
+#### Rollback/Cleanup
+- Move the test card back to its original lane after verification.
+- Delete `~/.codex/codexapp/kanban-state.json` if you need to reset local kanban state completely.
+
+### Feature: Kanban board expands sidebar for four-column layout
+
+#### Prerequisites
+- App server is running from this repository.
+- Open the web UI on a desktop-width browser window.
+- At least one visible thread exists in each Kanban lane, or enough threads to populate multiple lanes.
+
+#### Steps
+1. Open the sidebar thread organize menu and switch to `Kanban board`.
+2. Confirm the desktop sidebar expands noticeably wider than the normal thread list width.
+3. Verify `Backlog`, `In progress`, `Review`, and `Closed / followup` render side by side in a single row.
+4. Switch the organize menu back to `Chronological list`.
+5. Confirm the sidebar returns to its normal width.
+6. Switch back to `Kanban board` and drag the desktop sidebar resize handle.
+7. Confirm the resize handle continues to track the pointer cleanly while the expanded Kanban width updates.
+
+#### Expected Results
+- Desktop Kanban mode expands the sidebar enough to present four lanes in parallel.
+- Non-Kanban modes keep the original sidebar width.
+- Sidebar resizing remains usable after the Kanban width multiplier is applied.
+
+#### Rollback/Cleanup
+- Switch the organize menu back to `By project` or `Chronological list`.
+- Reset the sidebar width with the resize handle if you changed it during testing.
+
+### Feature: Dual Kanban boards and thread-state badges
+
+#### Prerequisites
+- App server is running from this repository.
+- Open the web UI on a desktop-width browser window.
+- The sidebar is visible and switched to `Kanban board`.
+- At least two visible threads exist so one can stay on the top board and one can be moved to `Implementation Tasks`.
+- Access to `~/.codex/codexapp/kanban-state.json` on the host machine.
+
+#### Steps
+1. Open the sidebar thread organize menu and switch to `Kanban board`.
+2. Confirm the existing four-lane board still renders first and a second board labeled `Implementation Tasks` renders below it with the same four lane headers.
+3. Create a new thread or fork an existing thread, then return to the Kanban view and confirm the new card appears on the top board in `Backlog`.
+4. Drag a card from the top board into the `Implementation Tasks` board and drop it in `Review`.
+5. Confirm the card leaves the top board, appears in the lower board `Review` lane, and `~/.codex/codexapp/kanban-state.json` now shows that thread entry with `"board": "implementation"` and `"status": "review"`.
+6. Open the moved card menu and choose `Move to top board`.
+7. Confirm the card returns to the top board while staying in `Review`.
+8. Rename a thread so its title starts with `💤 ` and another so it starts with `⏳ `, or use the content header buttons described below.
+9. Confirm the Kanban cards remove those emojis from the visible title, show `Waiting` or `In review` as a small badge beside the project name, keep the unread blue dot inline with the title row, and keep the age right-aligned on that same top row.
+10. Select one of those threads and use the content header buttons `Pending` and `Waiting for review`.
+11. Confirm clicking one button prepends the matching emoji to the stored thread name, clicking the other swaps the emoji, and clicking the active button again removes the managed emoji prefix.
+12. Refresh the browser and confirm the selected board, lane, and derived badge state all persist.
+
+#### Expected Results
+- Kanban mode renders two stacked boards: the original unlabeled top board and a lower board labeled `Implementation Tasks`.
+- New threads and forks default to the top board `Backlog`.
+- Drag-and-drop and menu actions can move cards between boards without changing the chosen lane unless requested.
+- Card styling uses a lighter shadow and selected cards keep their normal background while switching to a blue active border.
+- Managed `💤` and `⏳` prefixes are hidden from Kanban card titles and appear instead as `Waiting` and `In review` badges.
+- Content header buttons keep the managed title prefixes mutually exclusive and stay in sync with the sidebar after refresh.
+
+#### Rollback/Cleanup
+- Move any test cards back to their original board and lane.
+- Remove any temporary `💤` or `⏳` prefixes from thread names with the header buttons or thread rename action.
+- Delete or edit `~/.codex/codexapp/kanban-state.json` only if you want to reset local Kanban board placement state completely.
+
 ### Feature: Composer clipboard image paste
 
 #### Prerequisites

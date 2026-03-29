@@ -115,96 +115,146 @@
 
     <p v-else-if="isLoading && groups.length === 0" class="thread-tree-loading">Loading threads...</p>
 
-    <section v-else-if="isKanbanView" class="kanban-board">
-      <article v-for="lane in kanbanLanes" :key="lane.status" class="kanban-lane">
-        <SidebarMenuRow as="header" class="kanban-lane-header-row">
-          <span class="kanban-lane-title">{{ lane.label }}</span>
-          <template #right>
-            <span class="kanban-lane-count">{{ lane.threads.length }}</span>
-          </template>
-        </SidebarMenuRow>
+    <section v-else-if="isKanbanView" class="kanban-boards">
+      <section
+        v-for="board in kanbanBoards"
+        :key="board.board"
+        class="kanban-board-section"
+        :data-board="board.board"
+      >
+        <header v-if="board.label" class="kanban-board-section-header">
+          <span class="kanban-board-section-title">{{ board.label }}</span>
+        </header>
 
-        <ul v-if="lane.threads.length > 0" class="thread-list kanban-lane-list">
-          <li v-for="thread in lane.threads" :key="thread.id" class="thread-row-item">
-            <SidebarMenuRow
-              class="thread-row kanban-thread-row"
-              :data-active="thread.id === selectedThreadId"
-              :force-right-hover="isThreadMenuOpen(thread.id)"
-              @mouseleave="onThreadRowLeave(thread.id)"
-              @contextmenu="onThreadRowContextMenu($event, thread.id)"
-            >
-              <template #left>
-                <span class="thread-left-stack">
-                  <span
-                    v-if="thread.inProgress || thread.unread"
-                    class="thread-status-indicator"
-                    :data-state="getThreadState(thread)"
-                  />
-                </span>
-              </template>
-              <button class="thread-main-button kanban-thread-main-button" type="button" @click="onSelect(thread.id)">
-                <span class="thread-row-title-wrap kanban-thread-title-wrap">
-                  <span class="thread-row-title">{{ thread.title }}</span>
-                  <IconTablerGitFork v-if="thread.hasWorktree" class="thread-row-worktree-icon" title="Worktree thread" />
-                </span>
-                <span class="kanban-thread-project">{{ getProjectDisplayName(thread.projectName) }}</span>
-              </button>
+        <div class="kanban-board">
+          <article
+            v-for="lane in board.lanes"
+            :key="`${board.board}-${lane.status}`"
+            class="kanban-lane"
+            :data-drag-over="isKanbanLaneDragOver(board.board, lane.status)"
+            @dragenter.prevent="onKanbanLaneDragOver(board.board, lane.status)"
+            @dragover.prevent="onKanbanLaneDragOver(board.board, lane.status, $event)"
+            @drop.prevent="onKanbanLaneDrop(board.board, lane.status)"
+          >
+            <SidebarMenuRow as="header" class="kanban-lane-header-row">
+              <span class="kanban-lane-title">{{ lane.label }}</span>
               <template #right>
-                <span class="thread-row-time">{{ formatRelativeThread(thread) }}</span>
-              </template>
-              <template #right-hover>
-                <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap">
-                  <button
-                    class="thread-menu-trigger"
-                    type="button"
-                    title="thread_menu"
-                    @click.stop="toggleThreadMenu(thread.id)"
-                  >
-                    <IconTablerDots class="thread-icon" />
-                  </button>
-                  <div v-if="isThreadMenuOpen(thread.id)" class="thread-menu-panel" @click.stop>
-                    <button class="thread-menu-item" type="button" @click="onBrowseThreadFiles(thread.id)">
-                      Browse files
-                    </button>
-                    <button class="thread-menu-item" type="button" @click="onExportThread(thread.id)">
-                      Export chat
-                    </button>
-                    <button class="thread-menu-item" type="button" @click="onForkThread(thread.id)">
-                      Create chat fork
-                    </button>
-                    <button class="thread-menu-item" type="button" @click="openRenameThreadDialog(thread.id, thread.title)">
-                      Rename thread
-                    </button>
-                    <div class="thread-menu-divider" />
-                    <button
-                      v-for="statusOption in KANBAN_MENU_STATUSES"
-                      :key="`${thread.id}-${statusOption}`"
-                      class="thread-menu-item"
-                      :class="{ 'thread-menu-item-active': thread.kanbanStatus === statusOption }"
-                      type="button"
-                      :disabled="thread.kanbanStatus === statusOption"
-                      @click="moveThreadToKanbanStatus(thread.id, statusOption)"
-                    >
-                      {{ thread.kanbanStatus === statusOption ? `Current: ${getKanbanStatusLabel(statusOption)}` : `Move to ${getKanbanStatusLabel(statusOption)}` }}
-                    </button>
-                    <div class="thread-menu-divider" />
-                    <button class="thread-menu-item thread-menu-item-danger" type="button" @click="openDeleteThreadDialog(thread.id, thread.title)">
-                      Delete thread
-                    </button>
-                  </div>
-                </div>
+                <span class="kanban-lane-count">{{ lane.threads.length }}</span>
               </template>
             </SidebarMenuRow>
-          </li>
-        </ul>
 
-        <SidebarMenuRow v-else as="p" class="project-empty-row">
-          <template #left>
-            <span class="project-empty-spacer" />
-          </template>
-          <span class="project-empty">{{ lane.emptyLabel }}</span>
-        </SidebarMenuRow>
-      </article>
+            <ul v-if="lane.threads.length > 0" class="thread-list kanban-lane-list">
+              <li
+                v-for="thread in lane.threads"
+                :key="thread.id"
+                class="thread-row-item"
+                :data-dragging="isKanbanThreadDragging(thread.id)"
+              >
+                <article
+                  class="kanban-thread-row"
+                  :data-active="thread.id === selectedThreadId"
+                  :data-dragging="isKanbanThreadDragging(thread.id)"
+                  :data-menu-open="isThreadMenuOpen(thread.id)"
+                  draggable="true"
+                  :aria-grabbed="isKanbanThreadDragging(thread.id) ? 'true' : 'false'"
+                  @mouseleave="onThreadRowLeave(thread.id)"
+                  @contextmenu="onThreadRowContextMenu($event, thread.id)"
+                  @dragstart="onKanbanThreadDragStart($event, thread.id, board.board, lane.status)"
+                  @dragend="onKanbanThreadDragEnd"
+                >
+                  <button class="kanban-thread-main-button" type="button" @click="onSelect(thread.id)">
+                    <span class="kanban-thread-title-row">
+                      <span
+                        v-if="thread.inProgress || thread.unread"
+                        class="thread-status-indicator kanban-thread-status-indicator"
+                        :data-state="getThreadState(thread)"
+                      />
+                      <span class="thread-row-title">{{ getThreadDisplayTitle(thread) }}</span>
+                      <IconTablerGitFork v-if="thread.hasWorktree" class="thread-row-worktree-icon" title="Worktree thread" />
+                      <span class="kanban-thread-time">{{ formatRelativeThread(thread) }}</span>
+                    </span>
+                    <span class="kanban-thread-meta-row">
+                      <span class="kanban-thread-project">{{ getProjectDisplayName(thread.projectName) }}</span>
+                      <IconClaude v-if="thread.backend === 'claude'" class="thread-backend-icon" />
+                      <IconCodex v-else class="thread-backend-icon" />
+                      <span v-if="getThreadBadgeLabel(thread)" class="kanban-thread-badge">
+                        {{ getThreadBadgeLabel(thread) }}
+                      </span>
+                    </span>
+                  </button>
+
+                  <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap kanban-thread-menu-wrap">
+                    <button
+                      class="thread-menu-trigger kanban-thread-menu-trigger"
+                      type="button"
+                      title="thread_menu"
+                      @click.stop="toggleThreadMenu(thread.id)"
+                    >
+                      <IconTablerDots class="thread-icon" />
+                    </button>
+                    <div v-if="isThreadMenuOpen(thread.id)" class="thread-menu-panel" @click.stop>
+                      <button class="thread-menu-item" type="button" @click="onBrowseThreadFiles(thread.id)">
+                        Browse files
+                      </button>
+                      <button class="thread-menu-item" type="button" @click="onExportThread(thread.id)">
+                        Export chat
+                      </button>
+                      <button class="thread-menu-item" type="button" @click="onForkThread(thread.id)">
+                        Create chat fork
+                      </button>
+                      <button class="thread-menu-item" type="button" @click="openRenameThreadDialog(thread.id, thread.title)">
+                        Rename thread
+                      </button>
+                      <div class="thread-menu-divider" />
+                      <button
+                        class="thread-menu-item"
+                        :class="{ 'thread-menu-item-active': thread.kanbanBoard === 'primary' }"
+                        type="button"
+                        :disabled="thread.kanbanBoard === 'primary'"
+                        @click="moveThreadToKanbanBoard(thread, 'primary')"
+                      >
+                        {{ thread.kanbanBoard === 'primary' ? `Current: ${getKanbanBoardMenuLabel('primary')}` : `Move to ${getKanbanBoardMenuLabel('primary')}` }}
+                      </button>
+                      <button
+                        class="thread-menu-item"
+                        :class="{ 'thread-menu-item-active': thread.kanbanBoard === 'implementation' }"
+                        type="button"
+                        :disabled="thread.kanbanBoard === 'implementation'"
+                        @click="moveThreadToKanbanBoard(thread, 'implementation')"
+                      >
+                        {{ thread.kanbanBoard === 'implementation' ? `Current: ${getKanbanBoardMenuLabel('implementation')}` : `Move to ${getKanbanBoardMenuLabel('implementation')}` }}
+                      </button>
+                      <div class="thread-menu-divider" />
+                      <button
+                        v-for="statusOption in KANBAN_MENU_STATUSES"
+                        :key="`${thread.id}-${statusOption}`"
+                        class="thread-menu-item"
+                        :class="{ 'thread-menu-item-active': thread.kanbanStatus === statusOption }"
+                        type="button"
+                        :disabled="thread.kanbanStatus === statusOption"
+                        @click="moveThreadToKanbanStatus(thread.id, statusOption, thread.kanbanBoard)"
+                      >
+                        {{ thread.kanbanStatus === statusOption ? `Current: ${getKanbanStatusLabel(statusOption)}` : `Move to ${getKanbanStatusLabel(statusOption)}` }}
+                      </button>
+                      <div class="thread-menu-divider" />
+                      <button class="thread-menu-item thread-menu-item-danger" type="button" @click="openDeleteThreadDialog(thread.id, thread.title)">
+                        Delete thread
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              </li>
+            </ul>
+
+            <SidebarMenuRow v-else as="p" class="project-empty-row">
+              <template #left>
+                <span class="project-empty-spacer" />
+              </template>
+              <span class="project-empty">{{ lane.emptyLabel }}</span>
+            </SidebarMenuRow>
+          </article>
+        </div>
+      </section>
     </section>
 
     <ul v-else-if="isChronologicalView" class="thread-list thread-list-global">
@@ -483,9 +533,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
-import type { KanbanStatus, UiProjectGroup, UiThread } from '../../types/codex'
+import type { KanbanBoard, KanbanStatus, UiProjectGroup, UiThread } from '../../types/codex'
 import IconTablerChevronDown from '../icons/IconTablerChevronDown.vue'
 import IconTablerChevronRight from '../icons/IconTablerChevronRight.vue'
 import IconTablerDots from '../icons/IconTablerDots.vue'
@@ -494,7 +544,10 @@ import IconTablerFolder from '../icons/IconTablerFolder.vue'
 import IconTablerFolderOpen from '../icons/IconTablerFolderOpen.vue'
 import IconTablerGitFork from '../icons/IconTablerGitFork.vue'
 import IconTablerPin from '../icons/IconTablerPin.vue'
+import IconCodex from '../icons/IconCodex.vue'
+import IconClaude from '../icons/IconClaude.vue'
 import SidebarMenuRow from './SidebarMenuRow.vue'
+import { getManagedThreadTitleInfo } from '../../threadTitleMarkers'
 
 const props = defineProps<{
   groups: UiProjectGroup[]
@@ -508,7 +561,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [threadId: string]
   archive: [threadId: string]
-  'set-kanban-status': [payload: { threadId: string; status: KanbanStatus }]
+  'set-kanban-status': [payload: { threadId: string; status: KanbanStatus; board?: KanbanBoard }]
+  'thread-view-mode-change': [mode: 'project' | 'chronological' | 'kanban']
   'start-new-thread': [projectName: string]
   'browse-thread-files': [threadId: string]
   'rename-project': [payload: { projectName: string; displayName: string }]
@@ -554,6 +608,17 @@ type KanbanLaneDefinition = {
   emptyLabel: string
 }
 
+type KanbanBoardSectionDefinition = {
+  board: KanbanBoard
+  label: string
+}
+
+type ActiveKanbanDrag = {
+  threadId: string
+  fromBoard: KanbanBoard
+  fromStatus: Exclude<KanbanStatus, 'archived'>
+}
+
 const DRAG_START_THRESHOLD_PX = 4
 const PROJECT_GROUP_EXPANDED_GAP_PX = 6
 const expandedProjects = ref<Record<string, boolean>>({})
@@ -585,6 +650,10 @@ const organizeMenuWrapRef = ref<HTMLElement | null>(null)
 const isOrganizeMenuOpen = ref(false)
 const THREAD_VIEW_MODE_STORAGE_KEY = 'codex-web-local.thread-view-mode.v1'
 const threadViewMode = ref<'project' | 'chronological' | 'kanban'>(loadThreadViewMode())
+const KANBAN_BOARD_SECTIONS: KanbanBoardSectionDefinition[] = [
+  { board: 'primary', label: '' },
+  { board: 'implementation', label: 'Implementation Tasks' },
+]
 const KANBAN_LANES: KanbanLaneDefinition[] = [
   { status: 'backlog', label: 'Backlog', emptyLabel: 'No planned threads' },
   { status: 'in_progress', label: 'In progress', emptyLabel: 'Nothing running' },
@@ -592,6 +661,8 @@ const KANBAN_LANES: KanbanLaneDefinition[] = [
   { status: 'closed_followup', label: 'Closed / followup', emptyLabel: 'No follow-up items' },
 ]
 const KANBAN_MENU_STATUSES: KanbanStatus[] = [...KANBAN_LANES.map((lane) => lane.status), 'archived']
+const activeKanbanDrag = ref<ActiveKanbanDrag | null>(null)
+const dragOverKanbanLane = ref<{ board: KanbanBoard; status: Exclude<KanbanStatus, 'archived'> } | null>(null)
 const projectGroupResizeObserver =
   typeof window !== 'undefined'
     ? new ResizeObserver((entries) => {
@@ -641,6 +712,11 @@ watch(
 watch(threadViewMode, (value) => {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(THREAD_VIEW_MODE_STORAGE_KEY, value)
+  emit('thread-view-mode-change', value)
+})
+
+onMounted(() => {
+  emit('thread-view-mode-change', threadViewMode.value)
 })
 
 const normalizedSearchQuery = computed(() => props.searchQuery.trim().toLowerCase())
@@ -753,10 +829,16 @@ const kanbanThreads = computed<UiThread[]>(() => {
   })
 })
 
-const kanbanLanes = computed(() =>
-  KANBAN_LANES.map((lane) => ({
-    ...lane,
-    threads: kanbanThreads.value.filter((thread) => thread.kanbanStatus === lane.status),
+const kanbanBoards = computed(() =>
+  KANBAN_BOARD_SECTIONS.map((section) => ({
+    ...section,
+    lanes: KANBAN_LANES.map((lane) => ({
+      ...lane,
+      board: section.board,
+      threads: kanbanThreads.value.filter(
+        (thread) => thread.kanbanBoard === section.board && thread.kanbanStatus === lane.status,
+      ),
+    })),
   })),
 )
 
@@ -980,9 +1062,75 @@ function getKanbanStatusLabel(status: KanbanStatus): string {
   return 'Backlog'
 }
 
-function moveThreadToKanbanStatus(threadId: string, status: KanbanStatus): void {
-  emit('set-kanban-status', { threadId, status })
+function getKanbanBoardMenuLabel(board: KanbanBoard): string {
+  return board === 'implementation' ? 'Implementation Tasks' : 'top board'
+}
+
+function getThreadDisplayTitle(thread: UiThread): string {
+  const info = getManagedThreadTitleInfo(thread.title)
+  return info.displayTitle || thread.title
+}
+
+function getThreadBadgeLabel(thread: UiThread): string {
+  return getManagedThreadTitleInfo(thread.title).badgeLabel ?? ''
+}
+
+function moveThreadToKanbanStatus(threadId: string, status: KanbanStatus, board?: KanbanBoard): void {
+  emit('set-kanban-status', { threadId, status, board })
   closeThreadMenu()
+}
+
+function isKanbanThreadDragging(threadId: string): boolean {
+  return activeKanbanDrag.value?.threadId === threadId
+}
+
+function moveThreadToKanbanBoard(thread: UiThread, board: KanbanBoard): void {
+  moveThreadToKanbanStatus(thread.id, thread.kanbanStatus, board)
+}
+
+function isKanbanLaneDragOver(board: KanbanBoard, status: Exclude<KanbanStatus, 'archived'>): boolean {
+  return dragOverKanbanLane.value?.board === board && dragOverKanbanLane.value?.status === status
+}
+
+function onKanbanThreadDragStart(
+  event: DragEvent,
+  threadId: string,
+  fromBoard: KanbanBoard,
+  fromStatus: Exclude<KanbanStatus, 'archived'>,
+): void {
+  activeKanbanDrag.value = { threadId, fromBoard, fromStatus }
+  dragOverKanbanLane.value = { board: fromBoard, status: fromStatus }
+  closeThreadMenu()
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', threadId)
+  }
+}
+
+function onKanbanThreadDragEnd(): void {
+  activeKanbanDrag.value = null
+  dragOverKanbanLane.value = null
+}
+
+function onKanbanLaneDragOver(
+  board: KanbanBoard,
+  status: Exclude<KanbanStatus, 'archived'>,
+  event?: DragEvent,
+): void {
+  if (!activeKanbanDrag.value) return
+  dragOverKanbanLane.value = { board, status }
+  if (event?.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function onKanbanLaneDrop(board: KanbanBoard, status: Exclude<KanbanStatus, 'archived'>): void {
+  const drag = activeKanbanDrag.value
+  if (!drag) return
+  if (drag.fromBoard !== board || drag.fromStatus !== status) {
+    emit('set-kanban-status', { threadId: drag.threadId, status, board })
+  }
+  onKanbanThreadDragEnd()
 }
 
 function toggleProjectMenu(projectName: string): void {
@@ -1517,6 +1665,7 @@ onBeforeUnmount(() => {
   projectGroupElementByName.clear()
   projectMenuWrapElementByName.clear()
   unbindProjectMenuDismissListeners()
+  onKanbanThreadDragEnd()
   resetProjectDragState()
 })
 </script>
@@ -1576,12 +1725,38 @@ onBeforeUnmount(() => {
   @apply px-3 py-2 text-sm text-zinc-400;
 }
 
+.kanban-boards {
+  @apply flex flex-col gap-5 pr-0.5;
+}
+
+.kanban-board-section {
+  @apply flex flex-col gap-2;
+}
+
+.kanban-board-section-header {
+  @apply flex items-center px-1;
+}
+
+.kanban-board-section-title {
+  @apply text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500;
+}
+
 .kanban-board {
-  @apply flex flex-col gap-3 pr-0.5;
+  @apply grid gap-3 items-start;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .kanban-lane {
-  @apply flex flex-col gap-1;
+  @apply min-w-0 flex flex-col gap-1;
+}
+
+.kanban-lane[data-drag-over='true'] .kanban-lane-header-row {
+  @apply bg-zinc-200 text-zinc-900;
+}
+
+.kanban-lane[data-drag-over='true'] .kanban-lane-list,
+.kanban-lane[data-drag-over='true'] .project-empty-row {
+  @apply rounded-xl ring-2 ring-zinc-300/80 ring-inset;
 }
 
 .kanban-lane-header-row {
@@ -1597,23 +1772,72 @@ onBeforeUnmount(() => {
 }
 
 .kanban-lane-list {
-  @apply gap-1;
+  @apply min-w-0 gap-2;
 }
 
 .kanban-thread-row {
-  @apply rounded-xl border border-zinc-200/80 bg-white/90 px-3 py-2 shadow-sm hover:bg-white;
+  @apply relative min-w-0 rounded-[1.35rem] border border-zinc-200 bg-white px-4 py-3 cursor-grab transition;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.kanban-thread-row[data-dragging='true'] {
+  @apply opacity-60 cursor-grabbing;
+}
+
+.kanban-thread-row[data-active='true'] {
+  @apply border-blue-500 bg-white;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.kanban-thread-row:hover,
+.kanban-thread-row:focus-within {
+  @apply border-zinc-300 bg-white;
+}
+
+.thread-row-item[data-dragging='true'] {
+  @apply z-10;
 }
 
 .kanban-thread-main-button {
-  @apply flex flex-col items-start gap-0.5;
+  @apply flex w-full min-w-0 flex-col items-start gap-1.5 pr-6 text-left;
 }
 
-.kanban-thread-title-wrap {
-  @apply w-full;
+.kanban-thread-title-row {
+  @apply flex w-full min-w-0 items-center gap-2;
+}
+
+.kanban-thread-status-indicator {
+  @apply shrink-0;
+}
+
+.kanban-thread-time {
+  @apply ml-auto shrink-0 pr-2 text-[0.95rem] font-normal text-zinc-500;
+}
+
+.kanban-thread-meta-row {
+  @apply flex w-full min-w-0 items-center gap-2;
 }
 
 .kanban-thread-project {
-  @apply text-xs text-zinc-500 truncate;
+  @apply min-w-0 truncate text-xs text-zinc-500;
+}
+
+.kanban-thread-badge {
+  @apply inline-flex shrink-0 items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600;
+}
+
+.kanban-thread-menu-wrap {
+  @apply absolute right-3 top-3;
+}
+
+.kanban-thread-menu-trigger {
+  @apply opacity-0 pointer-events-none transition;
+}
+
+.kanban-thread-row:hover .kanban-thread-menu-trigger,
+.kanban-thread-row:focus-within .kanban-thread-menu-trigger,
+.kanban-thread-row[data-menu-open='true'] .kanban-thread-menu-trigger {
+  @apply opacity-100 pointer-events-auto;
 }
 
 .thread-tree-groups {
@@ -1742,6 +1966,14 @@ onBeforeUnmount(() => {
 
 .thread-row-worktree-icon {
   @apply w-3 h-3 text-zinc-500 shrink-0;
+}
+
+.thread-backend-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.5;
+  flex-shrink: 0;
 }
 
 .thread-status-indicator {

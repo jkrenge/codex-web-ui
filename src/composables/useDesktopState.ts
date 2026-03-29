@@ -32,6 +32,7 @@ import {
   type SkillInfo,
 } from '../api/codexGateway'
 import type {
+  KanbanBoard,
   KanbanStatus,
   CommandExecutionData,
   ReasoningEffort,
@@ -45,6 +46,15 @@ import type {
   UiServerRequestReply,
   UiThread,
 } from '../types/codex'
+import {
+  getClaudeSessions,
+  getClaudeSessionMessages,
+  sendClaudePrompt,
+  createClaudeSession,
+  interruptClaudeSession,
+  renameClaudeSession,
+} from '../api/claudeGateway'
+import { mergeClaudeSessionsIntoGroups, normalizeClaudeMessages } from '../api/normalizers/claude'
 import { normalizePathForUi, toProjectName } from '../pathUtils.js'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
@@ -63,9 +73,11 @@ const REASONING_EFFORT_OPTIONS: ReasoningEffort[] = ['none', 'minimal', 'low', '
 const GLOBAL_SERVER_REQUEST_SCOPE = '__global__'
 const MODEL_FALLBACK_ID = 'gpt-5.2-codex'
 const AUTO_COMMIT_MESSAGE_FALLBACK = 'Auto-commit from Codex rollback chat turn'
+const DEFAULT_KANBAN_BOARD: KanbanBoard = 'primary'
 const DEFAULT_KANBAN_STATUS: KanbanStatus = 'backlog'
 
 type KanbanThreadState = {
+  board: KanbanBoard
   status: KanbanStatus
   lanePosition: number
 }
@@ -528,6 +540,7 @@ function areThreadFieldsEqual(first: UiThread, second: UiThread): boolean {
     first.preview === second.preview &&
     first.unread === second.unread &&
     first.inProgress === second.inProgress &&
+    first.kanbanBoard === second.kanbanBoard &&
     first.kanbanStatus === second.kanbanStatus &&
     first.kanbanPosition === second.kanbanPosition
   )
@@ -589,6 +602,47 @@ function mergeThreadGroups(
   })
 
   return areGroupArraysEqual(previous, mergedGroups) ? previous : mergedGroups
+}
+
+function updateThreadKanbanStateInGroups(
+  groups: UiProjectGroup[],
+  threadId: string,
+  nextState: KanbanThreadState,
+): UiProjectGroup[] {
+  let changed = false
+  const nextGroups = groups.map((group) => {
+    let groupChanged = false
+    const nextThreads = group.threads.map((thread) => {
+      if (thread.id !== threadId) {
+        return thread
+      }
+
+      const nextThread: UiThread = {
+        ...thread,
+        kanbanBoard: nextState.board,
+        kanbanStatus: nextState.status,
+        kanbanPosition: nextState.lanePosition,
+      }
+      if (areThreadFieldsEqual(thread, nextThread)) {
+        return thread
+      }
+
+      groupChanged = true
+      changed = true
+      return nextThread
+    })
+
+    if (!groupChanged) {
+      return group
+    }
+
+    return {
+      projectName: group.projectName,
+      threads: nextThreads,
+    }
+  })
+
+  return changed ? nextGroups : groups
 }
 
 function mergeIncomingWithLocalInProgressThreads(
@@ -699,6 +753,7 @@ export function useDesktopState() {
   const isInterruptingTurn = ref(false)
   const isUpdatingSpeedMode = ref(false)
   const isRollingBack = ref(false)
+  const newThreadBackend = ref<'codex' | 'claude'>('codex')
   const error = ref('')
   const isPolling = ref(false)
   const hasLoadedThreads = ref(false)
@@ -1036,6 +1091,7 @@ export function useDesktopState() {
       return persisted
     }
     return {
+      board: thread.kanbanBoard || DEFAULT_KANBAN_BOARD,
       status: thread.kanbanStatus || DEFAULT_KANBAN_STATUS,
       lanePosition: Number.isFinite(thread.kanbanPosition) ? thread.kanbanPosition : getDefaultKanbanPosition(thread),
     }
@@ -1065,6 +1121,7 @@ export function useDesktopState() {
               ...thread,
               inProgress,
               unread,
+              kanbanBoard: kanban.board,
               kanbanStatus: kanban.status,
               kanbanPosition: kanban.lanePosition,
             }
@@ -1081,6 +1138,7 @@ export function useDesktopState() {
     const projectName = toProjectName(normalizedCwd)
     const nextThread: UiThread = {
       id: threadId,
+      backend: 'codex',
       title: toOptimisticThreadTitle(firstMessageText),
       projectName,
       cwd: normalizedCwd,
@@ -1090,6 +1148,7 @@ export function useDesktopState() {
       preview: firstMessageText,
       unread: false,
       inProgress: false,
+      kanbanBoard: DEFAULT_KANBAN_BOARD,
       kanbanStatus: DEFAULT_KANBAN_STATUS,
       kanbanPosition: Date.now(),
     }
@@ -1888,7 +1947,67 @@ export function useDesktopState() {
     return false
   }
 
+  function extractClaudeAssistantText(message: unknown): string {
+    if (!message || typeof message !== 'object') return ''
+    const msg = message as Record<string, unknown>
+    if (typeof msg.content === 'string') return msg.content
+    if (Array.isArray(msg.content)) {
+      return (msg.content as Array<Record<string, unknown>>)
+        .filter((b) => b.type === 'text')
+        .map((b) => (typeof b.text === 'string' ? b.text : ''))
+        .join('\n')
+    }
+    return ''
+  }
+
   function applyRealtimeUpdates(notification: RpcNotification): void {
+    if (notification.method.startsWith('claude/')) {
+      const params = notification.params as Record<string, unknown> | undefined
+      const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined
+
+      if (notification.method === 'claude/session/message' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: true }
+        const msg = params?.message
+        if (msg) {
+          const text = extractClaudeAssistantText(msg)
+          if (text) {
+            upsertLiveAgentMessage(sessionId, {
+              id: `claude-live-${sessionId}`,
+              role: 'assistant',
+              text,
+              messageType: 'agentMessage.live',
+            })
+          }
+        }
+      }
+
+      if (notification.method === 'claude/session/completed' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: false }
+        setLiveAgentMessagesForThread(sessionId, [])
+        // Reload messages if this session is selected
+        if (sessionId === selectedThreadId.value) {
+          getClaudeSessionMessages(sessionId).then((msgs) => {
+            persistedMessagesByThreadId.value = {
+              ...persistedMessagesByThreadId.value,
+              [sessionId]: normalizeClaudeMessages(msgs),
+            }
+          }).catch(() => {
+            // Keep UI stable on transient failures
+          })
+        }
+        // Trigger thread list refresh
+        pendingThreadsRefresh = true
+        void syncFromNotifications()
+      }
+
+      if (notification.method === 'claude/session/error' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: false }
+        setLiveAgentMessagesForThread(sessionId, [])
+      }
+
+      return
+    }
+
     if (handleServerRequestNotification(notification)) {
       return
     }
@@ -2205,15 +2324,18 @@ export function useDesktopState() {
     }
 
     try {
-      const [groups, kanbanBoard] = await Promise.all([
+      const [codexGroups, claudeSessions, kanbanBoard] = await Promise.all([
         getThreadGroups(),
+        getClaudeSessions().then((s) => s.filter((x) => x.isActive)).catch(() => []),
         getKanbanBoardState().catch(() => null),
         loadThreadTitleCacheIfNeeded(),
       ])
+      const groups = mergeClaudeSessionsIntoGroups(codexGroups, claudeSessions)
       if (kanbanBoard) {
         const nextKanbanState: Record<string, KanbanThreadState> = {}
         for (const item of Object.values(kanbanBoard.itemsByThreadId)) {
           nextKanbanState[item.threadId] = {
+            board: item.board,
             status: item.status,
             lanePosition: item.lanePosition,
           }
@@ -2267,6 +2389,21 @@ export function useDesktopState() {
     }
 
     try {
+      const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
+      if (thread?.backend === 'claude') {
+        const claudeMessages = await getClaudeSessionMessages(thread.id)
+        const normalized = normalizeClaudeMessages(claudeMessages)
+        persistedMessagesByThreadId.value = {
+          ...persistedMessagesByThreadId.value,
+          [thread.id]: normalized,
+        }
+        loadedMessagesByThreadId.value = {
+          ...loadedMessagesByThreadId.value,
+          [thread.id]: true,
+        }
+        return
+      }
+
       if (resumedThreadById.value[threadId] !== true) {
         await resumeThread(threadId)
         resumedThreadById.value = {
@@ -2356,16 +2493,27 @@ export function useDesktopState() {
     }
   }
 
-  async function setThreadKanbanStatusById(threadId: string, status: KanbanStatus) {
+  async function setThreadKanbanStatusById(
+    threadId: string,
+    next: {
+      status: KanbanStatus
+      board?: KanbanBoard
+    },
+  ) {
     const normalizedThreadId = threadId.trim()
     if (!normalizedThreadId) return
 
     const thread = flattenThreads(sourceGroups.value).find((row) => row.id === normalizedThreadId)
     const previousState = kanbanStateByThreadId.value[normalizedThreadId]
+    const previousSourceGroups = sourceGroups.value
+    const nextBoard = next.board ?? previousState?.board ?? thread?.kanbanBoard ?? DEFAULT_KANBAN_BOARD
+    const shouldReposition =
+      next.status !== previousState?.status || nextBoard !== previousState?.board
     const optimisticState: KanbanThreadState = {
-      status,
+      board: nextBoard,
+      status: next.status,
       lanePosition:
-        status !== previousState?.status
+        shouldReposition
           ? Date.now()
           : previousState?.lanePosition ?? thread?.kanbanPosition ?? Date.now(),
     }
@@ -2374,12 +2522,15 @@ export function useDesktopState() {
       ...kanbanStateByThreadId.value,
       [normalizedThreadId]: optimisticState,
     }
+    sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, optimisticState)
     applyThreadFlags()
     ensureSelectedThreadStillVisible()
 
     try {
       const persisted = await persistThreadKanbanStatus(normalizedThreadId, {
-        status,
+        board: nextBoard,
+        status: next.status,
+        lanePosition: optimisticState.lanePosition,
         snapshot: thread
           ? {
               title: thread.title,
@@ -2392,13 +2543,20 @@ export function useDesktopState() {
       kanbanStateByThreadId.value = {
         ...kanbanStateByThreadId.value,
         [normalizedThreadId]: {
+          board: persisted.board,
           status: persisted.status,
           lanePosition: persisted.lanePosition,
         },
       }
+      sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, {
+        board: persisted.board,
+        status: persisted.status,
+        lanePosition: persisted.lanePosition,
+      })
       applyThreadFlags()
       ensureSelectedThreadStillVisible()
     } catch (unknownError) {
+      sourceGroups.value = previousSourceGroups
       if (previousState) {
         kanbanStateByThreadId.value = {
           ...kanbanStateByThreadId.value,
@@ -2417,7 +2575,15 @@ export function useDesktopState() {
     const normalizedName = threadName.trim()
     if (!threadId || !normalizedName) return
 
+    const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
     try {
+      if (thread?.backend === 'claude') {
+        await renameClaudeSession(threadId, normalizedName)
+        threadTitleById.value = { ...threadTitleById.value, [threadId]: normalizedName }
+        applyThreadFlags()
+        await loadThreads()
+        return
+      }
       await renameThread(threadId, normalizedName)
       threadTitleById.value = { ...threadTitleById.value, [threadId]: normalizedName }
       applyThreadFlags()
@@ -2469,6 +2635,17 @@ export function useDesktopState() {
     const threadId = selectedThreadId.value
     const nextText = text.trim()
     if (!threadId || (!nextText && imageUrls.length === 0 && fileAttachments.length === 0)) return
+
+    if (selectedThread.value?.backend === 'claude') {
+      inProgressById.value = { ...inProgressById.value, [threadId]: true }
+      try {
+        await sendClaudePrompt(threadId, nextText)
+      } catch (err) {
+        inProgressById.value = { ...inProgressById.value, [threadId]: false }
+        throw err
+      }
+      return
+    }
 
     const isInProgress = inProgressById.value[threadId] === true
 
@@ -2539,6 +2716,16 @@ export function useDesktopState() {
     let threadId = ''
 
     try {
+      if (newThreadBackend.value === 'claude') {
+        const sessionId = await createClaudeSession(targetCwd, nextText)
+        selectedThreadId.value = sessionId
+        inProgressById.value[sessionId] = true
+        newThreadBackend.value = 'codex' // reset for next time
+        await loadThreads()
+        isSendingMessage.value = false
+        return sessionId
+      }
+
       try {
         threadId = await startThread(targetCwd || undefined, selectedModel || undefined)
       } catch (unknownError) {
@@ -2709,9 +2896,16 @@ export function useDesktopState() {
     if (inProgressById.value[threadId] !== true) return
     const turnId = activeTurnIdByThreadId.value[threadId]
 
+    const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
+
     isInterruptingTurn.value = true
     error.value = ''
     try {
+      if (thread?.backend === 'claude') {
+        await interruptClaudeSession(threadId)
+        inProgressById.value = { ...inProgressById.value, [threadId]: false }
+        return
+      }
       await interruptThreadTurn(threadId, turnId)
       setThreadInProgress(threadId, false)
       setTurnActivityForThread(threadId, null)
@@ -3109,6 +3303,7 @@ export function useDesktopState() {
     removeProject,
     reorderProject,
     pinProjectToTop,
+    newThreadBackend,
     startPolling,
     stopPolling,
   }

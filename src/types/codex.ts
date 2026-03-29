@@ -4,6 +4,7 @@ export type RpcEnvelope<T> = {
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type SpeedMode = 'standard' | 'fast'
+export type KanbanBoard = 'primary' | 'implementation'
 export type KanbanStatus = 'backlog' | 'in_progress' | 'review' | 'closed_followup' | 'archived'
 
 export type RpcMethodCatalog = {
@@ -62,6 +63,7 @@ export type UserInput = {
 
 export type UiThread = {
   id: string
+  backend: 'codex' | 'claude'
   title: string
   projectName: string
   cwd: string
@@ -71,6 +73,7 @@ export type UiThread = {
   preview: string
   unread: boolean
   inProgress: boolean
+  kanbanBoard: KanbanBoard
   kanbanStatus: KanbanStatus
   kanbanPosition: number
 }

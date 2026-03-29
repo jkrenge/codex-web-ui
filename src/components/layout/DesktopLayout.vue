@@ -36,9 +36,11 @@ import { useMobile } from '../../composables/useMobile'
 const props = withDefaults(
   defineProps<{
     isSidebarCollapsed?: boolean
+    isKanbanSidebar?: boolean
   }>(),
   {
     isSidebarCollapsed: false,
+    isKanbanSidebar: false,
   },
 )
 
@@ -52,7 +54,10 @@ const SIDEBAR_WIDTH_KEY = 'codex-web-local.sidebar-width.v1'
 const MIN_SIDEBAR_WIDTH = 260
 const MAX_SIDEBAR_WIDTH = 620
 const DEFAULT_SIDEBAR_WIDTH = 320
+const KANBAN_SIDEBAR_WIDTH_MULTIPLIER = 4
+const MIN_MAIN_WIDTH = 360
 const DEFAULT_LAYOUT_HEIGHT = '100dvh'
+const DEFAULT_LAYOUT_WIDTH = 1440
 
 function clampSidebarWidth(value: number): number {
   return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, value))
@@ -68,6 +73,7 @@ function loadSidebarWidth(): number {
 
 const sidebarWidth = ref(loadSidebarWidth())
 const layoutHeight = ref(DEFAULT_LAYOUT_HEIGHT)
+const layoutWidth = ref(DEFAULT_LAYOUT_WIDTH)
 
 function readLayoutHeight(): string {
   if (typeof window === 'undefined') return DEFAULT_LAYOUT_HEIGHT
@@ -75,17 +81,34 @@ function readLayoutHeight(): string {
   return `${Math.max(Math.round(viewportHeight), 0)}px`
 }
 
+function readLayoutWidth(): number {
+  if (typeof window === 'undefined') return DEFAULT_LAYOUT_WIDTH
+  const viewportWidth = window.visualViewport?.width ?? window.innerWidth
+  return Math.max(Math.round(viewportWidth), MIN_SIDEBAR_WIDTH)
+}
+
 let layoutHeightFrame = 0
 
-function syncLayoutHeight(): void {
+const sidebarWidthScale = computed(() => (props.isKanbanSidebar ? KANBAN_SIDEBAR_WIDTH_MULTIPLIER : 1))
+
+const effectiveSidebarWidth = computed(() => {
+  const preferredWidth = Math.round(sidebarWidth.value * sidebarWidthScale.value)
+  if (!props.isKanbanSidebar) return preferredWidth
+
+  const maxAvailableWidth = Math.max(MIN_SIDEBAR_WIDTH, layoutWidth.value - MIN_MAIN_WIDTH)
+  return Math.min(preferredWidth, maxAvailableWidth)
+})
+
+function syncLayoutMetrics(): void {
   layoutHeight.value = readLayoutHeight()
+  layoutWidth.value = readLayoutWidth()
 }
 
 function scheduleLayoutHeightSync(): void {
   if (layoutHeightFrame) return
   layoutHeightFrame = window.requestAnimationFrame(() => {
     layoutHeightFrame = 0
-    syncLayoutHeight()
+    syncLayoutMetrics()
   })
 }
 
@@ -102,7 +125,7 @@ const layoutStyle = computed(() => {
   }
   return {
     ...baseStyle,
-    '--sidebar-width': `${sidebarWidth.value}px`,
+    '--sidebar-width': `${effectiveSidebarWidth.value}px`,
     '--layout-columns': 'var(--sidebar-width) 1px minmax(0, 1fr)',
   }
 })
@@ -119,7 +142,7 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
 
   const onMouseMove = (moveEvent: MouseEvent) => {
     const delta = moveEvent.clientX - startX
-    sidebarWidth.value = clampSidebarWidth(startWidth + delta)
+    sidebarWidth.value = clampSidebarWidth(startWidth + delta / sidebarWidthScale.value)
   }
 
   const onMouseUp = () => {
@@ -133,7 +156,7 @@ function onResizeHandleMouseDown(event: MouseEvent): void {
 }
 
 onMounted(() => {
-  syncLayoutHeight()
+  syncLayoutMetrics()
   window.addEventListener('resize', scheduleLayoutHeightSync)
   window.visualViewport?.addEventListener('resize', scheduleLayoutHeightSync)
   window.visualViewport?.addEventListener('scroll', scheduleLayoutHeightSync)
