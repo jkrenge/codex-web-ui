@@ -175,6 +175,8 @@
                     </span>
                     <span class="kanban-thread-meta-row">
                       <span class="kanban-thread-project">{{ getProjectDisplayName(thread.projectName) }}</span>
+                      <IconClaude v-if="thread.backend === 'claude'" class="thread-backend-icon" />
+                      <IconCodex v-else class="thread-backend-icon" />
                       <span v-if="getThreadBadgeLabel(thread)" class="kanban-thread-badge">
                         {{ getThreadBadgeLabel(thread) }}
                       </span>
@@ -542,6 +544,8 @@ import IconTablerFolder from '../icons/IconTablerFolder.vue'
 import IconTablerFolderOpen from '../icons/IconTablerFolderOpen.vue'
 import IconTablerGitFork from '../icons/IconTablerGitFork.vue'
 import IconTablerPin from '../icons/IconTablerPin.vue'
+import IconCodex from '../icons/IconCodex.vue'
+import IconClaude from '../icons/IconClaude.vue'
 import SidebarMenuRow from './SidebarMenuRow.vue'
 import { getManagedThreadTitleInfo } from '../../threadTitleMarkers'
 
@@ -1962,6 +1966,14 @@ onBeforeUnmount(() => {
 
 .thread-row-worktree-icon {
   @apply w-3 h-3 text-zinc-500 shrink-0;
+}
+
+.thread-backend-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.5;
+  flex-shrink: 0;
 }
 
 .thread-status-indicator {
