@@ -5,7 +5,7 @@ import { normalizePathForUi, toProjectName } from '../../pathUtils.js'
 export function claudeSessionToUiThread(session: ClaudeSession): UiThread {
   const cwd = normalizePathForUi(session.cwd)
   const projectName = toProjectName(cwd)
-  const updatedAtMs = session.lastModified * 1000
+  const updatedAtMs = session.lastModified
   const updatedAtIso = new Date(updatedAtMs).toISOString()
 
   return {
