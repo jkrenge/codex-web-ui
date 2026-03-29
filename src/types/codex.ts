@@ -63,6 +63,7 @@ export type UserInput = {
 
 export type UiThread = {
   id: string
+  backend: 'codex' | 'claude'
   title: string
   projectName: string
   cwd: string

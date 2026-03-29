@@ -46,6 +46,15 @@ import type {
   UiServerRequestReply,
   UiThread,
 } from '../types/codex'
+import {
+  getClaudeSessions,
+  getClaudeSessionMessages,
+  sendClaudePrompt,
+  createClaudeSession,
+  interruptClaudeSession,
+  renameClaudeSession,
+} from '../api/claudeGateway'
+import { mergeClaudeSessionsIntoGroups, normalizeClaudeMessages } from '../api/normalizers/claude'
 import { normalizePathForUi, toProjectName } from '../pathUtils.js'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
@@ -744,6 +753,7 @@ export function useDesktopState() {
   const isInterruptingTurn = ref(false)
   const isUpdatingSpeedMode = ref(false)
   const isRollingBack = ref(false)
+  const newThreadBackend = ref<'codex' | 'claude'>('codex')
   const error = ref('')
   const isPolling = ref(false)
   const hasLoadedThreads = ref(false)
@@ -1128,6 +1138,7 @@ export function useDesktopState() {
     const projectName = toProjectName(normalizedCwd)
     const nextThread: UiThread = {
       id: threadId,
+      backend: 'codex',
       title: toOptimisticThreadTitle(firstMessageText),
       projectName,
       cwd: normalizedCwd,
@@ -1936,7 +1947,67 @@ export function useDesktopState() {
     return false
   }
 
+  function extractClaudeAssistantText(message: unknown): string {
+    if (!message || typeof message !== 'object') return ''
+    const msg = message as Record<string, unknown>
+    if (typeof msg.content === 'string') return msg.content
+    if (Array.isArray(msg.content)) {
+      return (msg.content as Array<Record<string, unknown>>)
+        .filter((b) => b.type === 'text')
+        .map((b) => (typeof b.text === 'string' ? b.text : ''))
+        .join('\n')
+    }
+    return ''
+  }
+
   function applyRealtimeUpdates(notification: RpcNotification): void {
+    if (notification.method.startsWith('claude/')) {
+      const params = notification.params as Record<string, unknown> | undefined
+      const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined
+
+      if (notification.method === 'claude/session/message' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: true }
+        const msg = params?.message
+        if (msg) {
+          const text = extractClaudeAssistantText(msg)
+          if (text) {
+            upsertLiveAgentMessage(sessionId, {
+              id: `claude-live-${sessionId}`,
+              role: 'assistant',
+              text,
+              messageType: 'agentMessage.live',
+            })
+          }
+        }
+      }
+
+      if (notification.method === 'claude/session/completed' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: false }
+        setLiveAgentMessagesForThread(sessionId, [])
+        // Reload messages if this session is selected
+        if (sessionId === selectedThreadId.value) {
+          getClaudeSessionMessages(sessionId).then((msgs) => {
+            persistedMessagesByThreadId.value = {
+              ...persistedMessagesByThreadId.value,
+              [sessionId]: normalizeClaudeMessages(msgs),
+            }
+          }).catch(() => {
+            // Keep UI stable on transient failures
+          })
+        }
+        // Trigger thread list refresh
+        pendingThreadsRefresh = true
+        void syncFromNotifications()
+      }
+
+      if (notification.method === 'claude/session/error' && sessionId) {
+        inProgressById.value = { ...inProgressById.value, [sessionId]: false }
+        setLiveAgentMessagesForThread(sessionId, [])
+      }
+
+      return
+    }
+
     if (handleServerRequestNotification(notification)) {
       return
     }
@@ -2253,11 +2324,13 @@ export function useDesktopState() {
     }
 
     try {
-      const [groups, kanbanBoard] = await Promise.all([
+      const [codexGroups, claudeSessions, kanbanBoard] = await Promise.all([
         getThreadGroups(),
+        getClaudeSessions().then((s) => s.filter((x) => x.isActive)).catch(() => []),
         getKanbanBoardState().catch(() => null),
         loadThreadTitleCacheIfNeeded(),
       ])
+      const groups = mergeClaudeSessionsIntoGroups(codexGroups, claudeSessions)
       if (kanbanBoard) {
         const nextKanbanState: Record<string, KanbanThreadState> = {}
         for (const item of Object.values(kanbanBoard.itemsByThreadId)) {
@@ -2316,6 +2389,21 @@ export function useDesktopState() {
     }
 
     try {
+      const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
+      if (thread?.backend === 'claude') {
+        const claudeMessages = await getClaudeSessionMessages(thread.id)
+        const normalized = normalizeClaudeMessages(claudeMessages)
+        persistedMessagesByThreadId.value = {
+          ...persistedMessagesByThreadId.value,
+          [thread.id]: normalized,
+        }
+        loadedMessagesByThreadId.value = {
+          ...loadedMessagesByThreadId.value,
+          [thread.id]: true,
+        }
+        return
+      }
+
       if (resumedThreadById.value[threadId] !== true) {
         await resumeThread(threadId)
         resumedThreadById.value = {
@@ -2498,7 +2586,15 @@ export function useDesktopState() {
     const normalizedName = threadName.trim()
     if (!threadId || !normalizedName) return
 
+    const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
     try {
+      if (thread?.backend === 'claude') {
+        await renameClaudeSession(threadId, normalizedName)
+        threadTitleById.value = { ...threadTitleById.value, [threadId]: normalizedName }
+        applyThreadFlags()
+        await loadThreads()
+        return
+      }
       await renameThread(threadId, normalizedName)
       threadTitleById.value = { ...threadTitleById.value, [threadId]: normalizedName }
       applyThreadFlags()
@@ -2550,6 +2646,17 @@ export function useDesktopState() {
     const threadId = selectedThreadId.value
     const nextText = text.trim()
     if (!threadId || (!nextText && imageUrls.length === 0 && fileAttachments.length === 0)) return
+
+    if (selectedThread.value?.backend === 'claude') {
+      inProgressById.value = { ...inProgressById.value, [threadId]: true }
+      try {
+        await sendClaudePrompt(threadId, nextText)
+      } catch (err) {
+        inProgressById.value = { ...inProgressById.value, [threadId]: false }
+        throw err
+      }
+      return
+    }
 
     const isInProgress = inProgressById.value[threadId] === true
 
@@ -2620,6 +2727,16 @@ export function useDesktopState() {
     let threadId = ''
 
     try {
+      if (newThreadBackend.value === 'claude') {
+        const sessionId = await createClaudeSession(targetCwd, nextText)
+        selectedThreadId.value = sessionId
+        inProgressById.value[sessionId] = true
+        newThreadBackend.value = 'codex' // reset for next time
+        await loadThreads()
+        isSendingMessage.value = false
+        return sessionId
+      }
+
       try {
         threadId = await startThread(targetCwd || undefined, selectedModel || undefined)
       } catch (unknownError) {
@@ -2811,9 +2928,16 @@ export function useDesktopState() {
       throw new Error('Could not determine active turn id for interrupt')
     }
 
+    const thread = flattenThreads(sourceGroups.value).find((row) => row.id === threadId)
+
     isInterruptingTurn.value = true
     error.value = ''
     try {
+      if (thread?.backend === 'claude') {
+        await interruptClaudeSession(threadId)
+        inProgressById.value = { ...inProgressById.value, [threadId]: false }
+        return
+      }
       await interruptThreadTurn(threadId, turnId)
       setThreadInProgress(threadId, false)
       setTurnActivityForThread(threadId, null)
@@ -3211,6 +3335,7 @@ export function useDesktopState() {
     removeProject,
     reorderProject,
     pinProjectToTop,
+    newThreadBackend,
     startPolling,
     stopPolling,
   }

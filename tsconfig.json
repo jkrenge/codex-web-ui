@@ -9,7 +9,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
 }

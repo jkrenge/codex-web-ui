@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { writeFile, stat } from 'node:fs/promises'
 import express, { type Express } from 'express'
 import { createCodexBridgeMiddleware } from './codexAppServerBridge.js'
+import { createClaudeBridgeMiddleware } from './claudeCodeBridge.js'
 import { createAuthSession } from './authMiddleware.js'
 import { createDirectoryListingHtml, createTextEditorHtml, decodeBrowsePath, isTextEditableFile, normalizeLocalPath } from './localBrowseUi.js'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -71,6 +72,7 @@ function readWildcardPathParam(value: unknown): string {
 export function createServer(options: ServerOptions = {}): ServerInstance {
   const app = express()
   const bridge = createCodexBridgeMiddleware()
+  const claudeBridge = createClaudeBridgeMiddleware()
   const authSession = options.password ? createAuthSession(options.password) : null
 
   // 1. Auth middleware (if password is set)
@@ -78,8 +80,9 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     app.use(authSession.middleware)
   }
 
-  // 2. Bridge middleware for /codex-api/*
+  // 2. Bridge middleware for /codex-api/* and /claude-api/*
   app.use(bridge)
+  app.use(claudeBridge)
 
   // 3. Serve local images referenced in markdown (desktop parity for absolute image paths)
   app.get('/codex-local-image', (req, res) => {
@@ -222,7 +225,10 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
 
   return {
     app,
-    dispose: () => bridge.dispose(),
+    dispose: () => {
+      bridge.dispose()
+      claudeBridge.dispose()
+    },
     attachWebSocket: (server: HttpServer) => {
       const wss = new WebSocketServer({ noServer: true })
 
@@ -245,13 +251,21 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
 
       wss.on('connection', (ws: WebSocket) => {
         ws.send(JSON.stringify({ method: 'ready', params: { ok: true }, atIso: new Date().toISOString() }))
-        const unsubscribe = bridge.subscribeNotifications((notification) => {
+        const unsubCodex = bridge.subscribeNotifications((notification) => {
+          if (ws.readyState !== 1) return
+          ws.send(JSON.stringify(notification))
+        })
+        const unsubClaude = claudeBridge.subscribeNotifications((notification) => {
           if (ws.readyState !== 1) return
           ws.send(JSON.stringify(notification))
         })
 
-        ws.on('close', unsubscribe)
-        ws.on('error', unsubscribe)
+        const cleanup = () => {
+          unsubCodex()
+          unsubClaude()
+        }
+        ws.on('close', cleanup)
+        ws.on('error', cleanup)
       })
     },
   }
