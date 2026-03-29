@@ -2716,6 +2716,16 @@ export function useDesktopState() {
     let threadId = ''
 
     try {
+      if (newThreadBackend.value === 'claude') {
+        const sessionId = await createClaudeSession(targetCwd, nextText)
+        selectedThreadId.value = sessionId
+        inProgressById.value[sessionId] = true
+        newThreadBackend.value = 'codex' // reset for next time
+        await loadThreads()
+        isSendingMessage.value = false
+        return sessionId
+      }
+
       try {
         threadId = await startThread(targetCwd || undefined, selectedModel || undefined)
       } catch (unknownError) {

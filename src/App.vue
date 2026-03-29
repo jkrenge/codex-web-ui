@@ -264,10 +264,13 @@
                 :dictation-click-to-toggle="dictationClickToToggle" :dictation-auto-send="dictationAutoSend"
                 :prepend-draft-request="rollbackDraftPrependRequest"
                 :dictation-language="dictationLanguage"
+                :is-new-thread="!selectedThreadId"
+                :new-thread-backend="newThreadBackend"
                 @submit="onSubmitThreadMessage"
                 @update:selected-model="onSelectModel"
                 @update:selected-reasoning-effort="onSelectReasoningEffort"
-                @update:selected-speed-mode="onSelectSpeedMode" />
+                @update:selected-speed-mode="onSelectSpeedMode"
+                @update:new-thread-backend="newThreadBackend = $event" />
             </div>
           </template>
           <template v-else>
@@ -516,6 +519,7 @@ const {
   removeProject,
   reorderProject,
   pinProjectToTop,
+  newThreadBackend,
   startPolling,
   stopPolling,
 } = useDesktopState()
