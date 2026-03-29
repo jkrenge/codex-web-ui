@@ -4,6 +4,27 @@
       {{ dictationErrorText }}
     </p>
 
+    <div v-if="isNewThread" class="backend-picker">
+      <button
+        type="button"
+        class="backend-picker-option"
+        :data-active="newThreadBackend === 'codex'"
+        @click="$emit('update:newThreadBackend', 'codex')"
+      >
+        <IconCodex :size="14" />
+        <span>Codex</span>
+      </button>
+      <button
+        type="button"
+        class="backend-picker-option"
+        :data-active="newThreadBackend === 'claude'"
+        @click="$emit('update:newThreadBackend', 'claude')"
+      >
+        <IconClaude :size="14" />
+        <span>Claude</span>
+      </button>
+    </div>
+
     <div class="thread-composer-shell" :class="{ 'thread-composer-shell--no-top-radius': hasQueueAbove }">
       <div v-if="selectedImages.length > 0" class="thread-composer-attachments">
         <div v-for="image in selectedImages" :key="image.id" class="thread-composer-attachment">
@@ -337,6 +358,8 @@ import type { ReasoningEffort, SpeedMode } from '../../types/codex'
 import { useDictation } from '../../composables/useDictation'
 import { searchComposerFiles, uploadFile, type ComposerFileSuggestion } from '../../api/codexGateway'
 import IconTablerArrowUp from '../icons/IconTablerArrowUp.vue'
+import IconCodex from '../icons/IconCodex.vue'
+import IconClaude from '../icons/IconClaude.vue'
 import IconTablerBolt from '../icons/IconTablerBolt.vue'
 import IconTablerFilePencil from '../icons/IconTablerFilePencil.vue'
 import IconTablerFolder from '../icons/IconTablerFolder.vue'
@@ -367,6 +390,8 @@ const props = defineProps<{
   prependDraftRequest?: { id: number; text: string } | null
   dictationAutoSend?: boolean
   dictationLanguage?: string
+  isNewThread?: boolean
+  newThreadBackend?: 'codex' | 'claude'
 }>()
 
 export type FileAttachment = { label: string; path: string; fsPath: string }
@@ -398,6 +423,7 @@ const emit = defineEmits<{
   'update:selected-model': [modelId: string]
   'update:selected-reasoning-effort': [effort: ReasoningEffort | '']
   'update:selected-speed-mode': [mode: SpeedMode]
+  'update:newThreadBackend': [backend: 'codex' | 'claude']
 }>()
 
 type SelectedImage = {
@@ -1244,6 +1270,36 @@ watch(
 
 .thread-composer {
   @apply w-full max-w-175 mx-auto px-2 sm:px-6;
+}
+
+.backend-picker {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--color-surface-secondary, #f0f0f0);
+  border-radius: 6px;
+  width: fit-content;
+  margin-bottom: 8px;
+}
+
+.backend-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text-secondary, #666);
+  transition: background 0.15s, color 0.15s;
+}
+
+.backend-picker-option[data-active="true"] {
+  background: white;
+  color: var(--color-text-primary, #111);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .thread-composer-shell {
