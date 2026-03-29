@@ -6,6 +6,7 @@ export type ClaudeSession = {
   gitBranch: string | null
   tag: string | null
   firstPrompt: string | null
+  isActive: boolean
 }
 
 export type ClaudeMessage = {

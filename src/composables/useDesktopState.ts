@@ -2326,7 +2326,7 @@ export function useDesktopState() {
     try {
       const [codexGroups, claudeSessions, kanbanBoard] = await Promise.all([
         getThreadGroups(),
-        getClaudeSessions().catch(() => []),
+        getClaudeSessions().then((s) => s.filter((x) => x.isActive)).catch(() => []),
         getKanbanBoardState().catch(() => null),
         loadThreadTitleCacheIfNeeded(),
       ])

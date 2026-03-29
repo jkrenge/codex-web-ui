@@ -39,6 +39,7 @@ type SessionsResponse = {
     lastModified: number
     gitBranch?: string | null
     tag?: string | null
+    isActive?: boolean
   }>
 }
 
@@ -53,6 +54,7 @@ export async function getClaudeSessions(): Promise<ClaudeSession[]> {
     gitBranch: s.gitBranch ?? null,
     tag: s.tag ?? null,
     firstPrompt: s.firstPrompt ?? null,
+    isActive: s.isActive ?? false,
   }))
 }
 

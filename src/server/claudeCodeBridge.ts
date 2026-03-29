@@ -135,6 +135,38 @@ async function writeScanDirs(directories: string[]): Promise<void> {
 // Session discovery
 // ---------------------------------------------------------------------------
 
+function getClaudeSessionsDir(): string {
+  return join(homedir(), '.claude', 'sessions')
+}
+
+async function getActiveSessionIds(): Promise<Set<string>> {
+  const sessionsDir = getClaudeSessionsDir()
+  const activeIds = new Set<string>()
+  try {
+    const entries = await readdir(sessionsDir)
+    const jsonFiles = entries.filter((e) => e.endsWith('.json'))
+    const results = await Promise.allSettled(
+      jsonFiles.map(async (file) => {
+        const content = await readFile(join(sessionsDir, file), 'utf8')
+        const parsed = JSON.parse(content) as unknown
+        const record = asRecord(parsed)
+        if (record && typeof record.sessionId === 'string') {
+          return record.sessionId
+        }
+        return null
+      }),
+    )
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) {
+        activeIds.add(result.value)
+      }
+    }
+  } catch {
+    // ~/.claude/sessions may not exist
+  }
+  return activeIds
+}
+
 async function discoverProjectDirs(): Promise<string[]> {
   const projectsDir = getClaudeProjectsDir()
   try {
@@ -304,9 +336,17 @@ export function createClaudeBridgeMiddleware(): ClaudeBridgeMiddleware {
           setJson(res, 503, { error: 'Claude Agent SDK not available' })
           return
         }
-        const { sessions, cache } = await listAllSessions(sdk, sessionsCache)
+        const [{ sessions, cache }, activeIds] = await Promise.all([
+          listAllSessions(sdk, sessionsCache),
+          getActiveSessionIds(),
+        ])
         sessionsCache = cache
-        setJson(res, 200, { sessions })
+        const enriched = sessions.map((s) => {
+          const info = asRecord(s)
+          const sessionId = info && typeof info.sessionId === 'string' ? info.sessionId : ''
+          return { ...info, isActive: activeIds.has(sessionId) }
+        })
+        setJson(res, 200, { sessions: enriched })
         return
       }
 
