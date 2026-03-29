@@ -1,8 +1,5 @@
 <template>
   <header class="content-header">
-    <div class="content-leading">
-      <slot name="leading" />
-    </div>
     <h1 class="content-title">{{ title }}</h1>
     <div class="content-actions">
       <slot name="actions" />
@@ -20,7 +17,10 @@ defineProps<{
 @reference "tailwindcss";
 
 .content-header {
-  @apply relative z-10 w-full min-h-12 sm:min-h-14 flex items-center gap-2 sm:gap-3 px-2 sm:px-3 pt-3 sm:pt-4 pb-2 bg-white;
+  @apply relative z-10 w-full min-h-12 sm:min-h-14 flex items-center gap-2 sm:gap-3 pt-3 sm:pt-4 bg-white;
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-bottom: 0;
 }
 
 .content-title {
@@ -31,7 +31,4 @@ defineProps<{
   @apply flex items-center justify-end gap-1;
 }
 
-.content-leading {
-  @apply flex items-center gap-1;
-}
 </style>

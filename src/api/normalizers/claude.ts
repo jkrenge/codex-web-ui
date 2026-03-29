@@ -23,6 +23,8 @@ export function claudeSessionToUiThread(session: ClaudeSession): UiThread {
     kanbanBoard: 'primary',
     kanbanStatus: 'backlog',
     kanbanPosition: Math.max(0, updatedAtMs),
+    prTitle: null,
+    prUrl: null,
   }
 }
 

@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## Git Remotes
+
+- `origin` → `git@github.com:jkrenge/codex-web-ui.git` (Julian's fork)
+- `upstream` → `https://github.com/friuns2/codexUI.git` (original repo)
+- To sync upstream: `git fetch upstream main && git merge upstream/main --no-edit`
+- To sync origin: `git fetch origin main && git merge origin/main --no-edit`
+
 ## "Push to main or commit to main" Means Merge To Local Main
 
 - When the user says "push", interpret it as: merge the current work into local `main`
@@ -36,10 +43,17 @@
 
 ## Build And Live Restart After Every Change
 
-- After every code change, run `npm run build` before reporting back so the user can verify the latest build.
-- After every successful build, restart the active local app server process for this repo:
-  - `node ./dist-cli/index.js --no-tunnel --port 5999 --no-open`
-- Make sure the live local instance behind the current `:8445` URL is serving the updated backend and frontend before asking the user to test.
+- This project uses **pnpm** (not npm). Always use `pnpm run build` and `pnpm install`.
+- After every code change, run `pnpm run build` before reporting back so the user can verify the latest build.
+- The local app server is managed by **launchd** as `com.julian.codex-web-ui`.
+  - It runs: `node ./dist-cli/index.js --no-tunnel --port 5999 --no-open`
+  - Launch script: `~/.openclaw/workspace/scripts/run_codex_web_ui.zsh`
+  - Working directory: `/Users/julian/Code/codex-web-ui`
+- After every successful build, restart the launchd service to pick up the new build:
+  - `launchctl kickstart -k gui/$(id -u)/com.julian.codex-web-ui`
+- Do **not** start the server manually with `node` or `nohup` — always use launchctl.
+- The live UI is served at `julians-mac-studio.tail48971e.ts.net:8445` via Tailscale serve, which proxies to `localhost:5999`.
+- Verify the restart with: `curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:5999/`
 - If a change is documentation-only or otherwise does not affect the running app, note that explicitly instead of restarting unnecessarily.
 
 ## Commits And Pushes Require Approval
@@ -80,7 +94,7 @@
   - inspect row HTML and count expected rendered nodes (for example `strong.message-bold-text`)
   - save screenshot to `output/playwright/<task-name>.png`
 - Playwright test sequence (when Playwright is requested):
-  1. Start or confirm a single dev server instance (`pnpm run dev -- --host 0.0.0.0 --port 4173`).
+  1. Start or confirm a single dev server instance (`npm run dev -- --host 0.0.0.0 --port 4173`).
   2. If there are stale servers on the same port, stop them first to avoid false test results.
   3. Run Playwright CLI against `http://127.0.0.1:4173` (or required test URL) and exercise the changed flow.
   4. For responsive/mobile changes, run checks at 375x812 and 768x1024.
@@ -116,7 +130,7 @@
 - Use this flow when validating UI behavior on Oracle A1 from the local Mac machine.
 - On A1, start the app server with Codex CLI available in `PATH`:
   - `export PATH="$HOME/.npm-global/bin:$PATH"`
-  - `pnpm run dev -- --host 0.0.0.0 --port 4173`
+  - `npm run dev -- --host 0.0.0.0 --port 4173`
 - From Mac, run Playwright against Tailscale URL (`http://100.127.77.25:4173`), not localhost.
 - Verify success with both checks:
   - UI assertion in Playwright (new project/folder appears in sidebar or selector).

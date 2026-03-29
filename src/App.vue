@@ -133,6 +133,7 @@
           <button class="sidebar-settings-button" type="button" @click="isSettingsOpen = !isSettingsOpen">
             <IconTablerSettings class="sidebar-settings-icon" />
             <span>Settings</span>
+            <span class="sidebar-build-version">0.0.8</span>
           </button>
         </div>
       </section>
@@ -141,16 +142,6 @@
     <template #content>
       <section class="content-root">
         <ContentHeader :title="contentTitle">
-          <template #leading>
-            <SidebarThreadControls
-              v-if="isSidebarCollapsed || isMobile"
-              class="sidebar-thread-controls-header-host"
-              :is-sidebar-collapsed="isSidebarCollapsed"
-              :show-new-thread-button="true"
-              @toggle-sidebar="setSidebarCollapsed(!isSidebarCollapsed)"
-              @start-new-thread="onStartNewThreadFromToolbar"
-            />
-          </template>
           <template #actions>
             <div
               v-if="selectedThread && !isHomeRoute && !isSkillsRoute"
@@ -177,6 +168,53 @@
             </div>
           </template>
         </ContentHeader>
+        <div
+          v-if="selectedThread && !isHomeRoute && !isSkillsRoute"
+          class="content-header-pr-bar"
+        >
+          <template v-if="!prEditing">
+            <a
+              v-if="prTitleInput || prUrlInput"
+              class="content-header-pr-display"
+              :href="prUrlInput || undefined"
+              :target="prUrlInput ? '_blank' : undefined"
+              :rel="prUrlInput ? 'noopener noreferrer' : undefined"
+            >
+              {{ prTitleInput || prUrlInput }}
+            </a>
+            <span v-else class="content-header-pr-empty">No PR linked</span>
+            <button class="content-header-pr-edit-btn" type="button" title="Edit PR link" @click="prEditing = true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+            </button>
+            <button
+              class="content-header-pr-edit-btn"
+              type="button"
+              title="Auto-discover PR from thread"
+              :disabled="prDiscoveryPending"
+              @click="onPrAutoDiscover"
+            >
+              <svg v-if="!prDiscoveryPending" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            </button>
+          </template>
+          <template v-else>
+            <input
+              v-model="prTitleInput"
+              class="content-header-pr-input"
+              type="text"
+              placeholder="PR title"
+              @keydown.enter="onPrFieldEnter"
+            />
+            <input
+              v-model="prUrlInput"
+              class="content-header-pr-input content-header-pr-url"
+              type="url"
+              placeholder="PR URL"
+              @keydown.enter="onPrFieldEnter"
+            />
+            <button class="content-header-pr-done-btn" type="button" @click="onPrEditDone">Done</button>
+          </template>
+        </div>
 
         <section class="content-body">
           <template v-if="isSkillsRoute">
@@ -502,6 +540,7 @@ const {
   setThreadKanbanStatusById,
   forkThreadById,
   renameThreadById,
+  updateThreadPrLink,
   sendMessageToSelectedThread,
   sendMessageToNewThread,
   interruptSelectedThreadTurn,
@@ -604,13 +643,59 @@ const contentTitle = computed(() => {
   if (isHomeRoute.value) return 'New thread'
   return selectedThreadTitleInfo.value.displayTitle || selectedThread.value?.title || 'Choose a thread'
 })
+
+const prTitleInput = ref('')
+const prUrlInput = ref('')
+const prEditing = ref(false)
+let lastPrSyncThreadId = ''
+
+watch(selectedThread, (thread) => {
+  if (!thread || thread.id === lastPrSyncThreadId) return
+  lastPrSyncThreadId = thread.id
+  prTitleInput.value = thread.prTitle ?? ''
+  prUrlInput.value = thread.prUrl ?? ''
+  prEditing.value = false
+}, { immediate: true })
+
+function savePrIfChanged() {
+  const thread = selectedThread.value
+  if (!thread) return
+  const titleChanged = (prTitleInput.value.trim() || '') !== (thread.prTitle ?? '')
+  const urlChanged = (prUrlInput.value.trim() || '') !== (thread.prUrl ?? '')
+  if (titleChanged || urlChanged) {
+    void updateThreadPrLink(thread.id, prTitleInput.value, prUrlInput.value)
+  }
+}
+
+function onPrEditDone() {
+  savePrIfChanged()
+  prEditing.value = false
+}
+
+function onPrFieldEnter(event: KeyboardEvent) {
+  ;(event.target as HTMLInputElement)?.blur()
+  onPrEditDone()
+}
+
+const prDiscoveryPending = ref(false)
+let prDiscoveryThreadId = ''
+
+function onPrAutoDiscover() {
+  const thread = selectedThread.value
+  if (!thread || prDiscoveryPending.value) return
+  prDiscoveryThreadId = thread.id
+  prDiscoveryPending.value = true
+  void sendMessageToSelectedThread(
+    'What is the PR title and URL for this session? Respond ONLY with JSON in this exact format, no other text: {"prTitle": "...", "prUrl": "..."}',
+  )
+}
 const browserHostName =
   typeof window !== 'undefined'
     ? (window.location.hostname || window.location.host || 'codexui')
     : 'codexui'
 const pageTitle = computed(() => {
   const threadTitle = selectedThreadTitleInfo.value.displayTitle.trim()
-  return threadTitle || browserHostName
+  return threadTitle ? `Codex: ${threadTitle}` : `Codex`
 })
 const filteredMessages = computed(() =>
   messages.value.filter((message) => {
@@ -636,6 +721,29 @@ const composerCwd = computed(() => {
   return selectedThread.value?.cwd?.trim() ?? ''
 })
 const isSelectedThreadInProgress = computed(() => !isHomeRoute.value && selectedThread.value?.inProgress === true)
+
+watch(isSelectedThreadInProgress, (inProgress, wasInProgress) => {
+  if (!prDiscoveryPending.value) return
+  if (wasInProgress && !inProgress && selectedThread.value?.id === prDiscoveryThreadId) {
+    const lastMsg = [...messages.value].reverse().find((m) => m.role === 'assistant')
+    if (lastMsg?.text) {
+      const jsonMatch = lastMsg.text.match(/\{[\s\S]*?"prTitle"[\s\S]*?"prUrl"[\s\S]*?\}/)
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]) as { prTitle?: string; prUrl?: string }
+          if (parsed.prTitle || parsed.prUrl) {
+            prTitleInput.value = parsed.prTitle ?? ''
+            prUrlInput.value = parsed.prUrl ?? ''
+            void updateThreadPrLink(prDiscoveryThreadId, prTitleInput.value, prUrlInput.value)
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    }
+    prDiscoveryPending.value = false
+    prDiscoveryThreadId = ''
+  }
+})
+
 const newThreadFolderOptions = computed(() => {
   const options: Array<{ value: string; label: string }> = []
   const seenCwds = new Set<string>()
@@ -1739,6 +1847,39 @@ async function submitFirstMessageForNewThread(
   @apply border-blue-500 text-blue-700 bg-blue-50/40;
 }
 
+.content-header-pr-bar {
+  @apply flex items-center gap-2 pb-2.5 bg-white border-b border-zinc-100;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.content-header-pr-display {
+  @apply text-xs text-blue-600 hover:text-blue-800 truncate transition-colors;
+  margin-top: -8px;
+}
+
+.content-header-pr-empty {
+  @apply text-xs text-zinc-400;
+}
+
+.content-header-pr-edit-btn {
+  @apply shrink-0 p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition;
+}
+
+.content-header-pr-input {
+  @apply rounded border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700 placeholder:text-zinc-400 outline-none transition;
+  @apply focus:border-zinc-400 focus:ring-1 focus:ring-zinc-200;
+  width: 160px;
+}
+
+.content-header-pr-url {
+  width: 240px;
+}
+
+.content-header-pr-done-btn {
+  @apply shrink-0 rounded border border-zinc-200 bg-white px-2 py-0.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 transition;
+}
+
 .composer-with-queue {
   @apply w-full;
 }
@@ -1862,6 +2003,10 @@ async function submitFirstMessageForNewThread(
 
 .sidebar-settings-button {
   @apply flex items-center gap-2 w-full rounded-lg border-0 bg-transparent px-2 py-2 text-sm text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 cursor-pointer;
+}
+
+.sidebar-build-version {
+  @apply ml-auto text-[10px] text-zinc-400 select-none tabular-nums;
 }
 
 .sidebar-settings-icon {

@@ -80,6 +80,8 @@ type KanbanThreadState = {
   board: KanbanBoard
   status: KanbanStatus
   lanePosition: number
+  prTitle: string | null
+  prUrl: string | null
 }
 
 function loadReadStateMap(): Record<string, string> {
@@ -1094,6 +1096,8 @@ export function useDesktopState() {
       board: thread.kanbanBoard || DEFAULT_KANBAN_BOARD,
       status: thread.kanbanStatus || DEFAULT_KANBAN_STATUS,
       lanePosition: Number.isFinite(thread.kanbanPosition) ? thread.kanbanPosition : getDefaultKanbanPosition(thread),
+      prTitle: thread.prTitle ?? null,
+      prUrl: thread.prUrl ?? null,
     }
   }
 
@@ -1124,6 +1128,8 @@ export function useDesktopState() {
               kanbanBoard: kanban.board,
               kanbanStatus: kanban.status,
               kanbanPosition: kanban.lanePosition,
+              prTitle: kanban.prTitle,
+              prUrl: kanban.prUrl,
             }
           })
           .filter((thread) => thread.kanbanStatus !== 'archived'),
@@ -1151,6 +1157,8 @@ export function useDesktopState() {
       kanbanBoard: DEFAULT_KANBAN_BOARD,
       kanbanStatus: DEFAULT_KANBAN_STATUS,
       kanbanPosition: Date.now(),
+      prTitle: null,
+      prUrl: null,
     }
 
     const existingGroupIndex = sourceGroups.value.findIndex((group) => group.projectName === projectName)
@@ -2338,6 +2346,8 @@ export function useDesktopState() {
             board: item.board,
             status: item.status,
             lanePosition: item.lanePosition,
+            prTitle: item.prTitle ?? null,
+            prUrl: item.prUrl ?? null,
           }
         }
         kanbanStateByThreadId.value = nextKanbanState
@@ -2527,6 +2537,8 @@ export function useDesktopState() {
         shouldReposition
           ? Date.now()
           : previousState?.lanePosition ?? thread?.kanbanPosition ?? Date.now(),
+      prTitle: previousState?.prTitle ?? thread?.prTitle ?? null,
+      prUrl: previousState?.prUrl ?? thread?.prUrl ?? null,
     }
 
     kanbanStateByThreadId.value = {
@@ -2557,12 +2569,16 @@ export function useDesktopState() {
           board: persisted.board,
           status: persisted.status,
           lanePosition: persisted.lanePosition,
+          prTitle: persisted.prTitle ?? kanbanStateByThreadId.value[normalizedThreadId]?.prTitle ?? null,
+          prUrl: persisted.prUrl ?? kanbanStateByThreadId.value[normalizedThreadId]?.prUrl ?? null,
         },
       }
       sourceGroups.value = updateThreadKanbanStateInGroups(sourceGroups.value, normalizedThreadId, {
         board: persisted.board,
         status: persisted.status,
         lanePosition: persisted.lanePosition,
+        prTitle: persisted.prTitle ?? null,
+        prUrl: persisted.prUrl ?? null,
       })
       applyThreadFlags()
       ensureSelectedThreadStillVisible()
@@ -2579,6 +2595,37 @@ export function useDesktopState() {
       applyThreadFlags()
       ensureSelectedThreadStillVisible()
       error.value = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
+    }
+  }
+
+  async function updateThreadPrLink(threadId: string, prTitle: string, prUrl: string) {
+    const normalizedThreadId = threadId.trim()
+    if (!normalizedThreadId) return
+
+    const trimmedTitle = prTitle.trim() || null
+    const trimmedUrl = prUrl.trim() || null
+
+    const prev = kanbanStateByThreadId.value[normalizedThreadId]
+    kanbanStateByThreadId.value = {
+      ...kanbanStateByThreadId.value,
+      [normalizedThreadId]: {
+        ...(prev ?? { board: 'primary', status: 'backlog', lanePosition: Date.now() }),
+        prTitle: trimmedTitle,
+        prUrl: trimmedUrl,
+      },
+    }
+    applyThreadFlags()
+
+    try {
+      await persistThreadKanbanStatus(normalizedThreadId, {
+        prTitle: trimmedTitle ?? '',
+        prUrl: trimmedUrl ?? '',
+      })
+    } catch {
+      if (prev) {
+        kanbanStateByThreadId.value = { ...kanbanStateByThreadId.value, [normalizedThreadId]: prev }
+      }
+      applyThreadFlags()
     }
   }
 
@@ -3317,6 +3364,7 @@ export function useDesktopState() {
     archiveThreadById,
     setThreadKanbanStatusById,
     renameThreadById,
+    updateThreadPrLink,
     forkThreadById,
     sendMessageToSelectedThread,
     sendMessageToNewThread,

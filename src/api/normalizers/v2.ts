@@ -222,6 +222,8 @@ function toUiThread(summary: Thread): UiThread {
     kanbanBoard: 'primary',
     kanbanStatus: 'backlog',
     kanbanPosition: Math.max(0, summary.updatedAt * 1000),
+    prTitle: null,
+    prUrl: null,
   }
 }
 

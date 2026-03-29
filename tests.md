@@ -482,3 +482,30 @@ This file tracks manual regression and feature verification steps.
 
 #### Rollback/Cleanup
 - No cleanup required.
+
+### Feature: Kanban card visual refinements
+
+#### Prerequisites
+- App server is running and accessible.
+- At least a few threads exist across different kanban lanes (backlog, in progress, review).
+- Some threads have "In review" or "Waiting" badges.
+
+#### Steps
+1. Open the sidebar in kanban board view.
+2. Inspect card border-radius — should be small (~6px), not heavily rounded.
+3. Check card inner padding — should be compact (12px horizontal, 8px vertical).
+4. Look at the relative timestamps (e.g. "9m", "6d") — font should be noticeably smaller than the title text.
+5. Verify badges ("In review", "Waiting") display in normal case (not ALL CAPS), no extra letter-spacing, with a small rounded-md shape.
+6. Confirm the worktree fork icon no longer appears on kanban cards.
+7. Verify card titles have more horizontal space, with the timestamp right-aligned.
+8. Check vertical spacing between cards in each lane — should have slightly more breathing room than before.
+
+#### Expected Results
+- Cards look compact and utilitarian with small corner radius.
+- Timestamps are visually secondary (small, lighter color).
+- Badges resemble GitHub-style labels (lowercase, tight, small radius).
+- No worktree icon visible on kanban cards.
+- Cards have adequate vertical spacing between them.
+
+#### Rollback/Cleanup
+- Revert changes in `src/components/sidebar/SidebarThreadTree.vue` if needed.

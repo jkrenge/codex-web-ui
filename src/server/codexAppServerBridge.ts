@@ -2069,6 +2069,8 @@ export function createCodexBridgeMiddleware(): CodexBridgeMiddleware {
                   projectName: typeof snapshot.projectName === 'string' ? snapshot.projectName : undefined,
                 }
               : undefined,
+            prTitle: typeof payload?.prTitle === 'string' ? payload.prTitle : undefined,
+            prUrl: typeof payload?.prUrl === 'string' ? payload.prUrl : undefined,
           })
           setJson(res, 200, { data: item })
         } catch (error) {

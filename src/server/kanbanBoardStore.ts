@@ -24,6 +24,8 @@ export type KanbanBoardItem = {
   lastMovedAt: string
   archivedAt: string | null
   snapshot: KanbanThreadSnapshot
+  prTitle: string | null
+  prUrl: string | null
 }
 
 export type KanbanBoardState = {
@@ -47,6 +49,8 @@ export type KanbanThreadUpdate = {
   status?: KanbanStatus
   lanePosition?: number
   snapshot?: Partial<KanbanThreadSnapshot>
+  prTitle?: string | null
+  prUrl?: string | null
 }
 
 type KanbanBoardStoreOptions = {
@@ -108,6 +112,8 @@ function normalizeBoardItem(threadId: string, value: unknown): KanbanBoardItem |
       ? record.archivedAt.trim()
       : null,
     snapshot,
+    prTitle: typeof record.prTitle === 'string' && record.prTitle.trim().length > 0 ? record.prTitle.trim() : null,
+    prUrl: typeof record.prUrl === 'string' && record.prUrl.trim().length > 0 ? record.prUrl.trim() : null,
   }
 }
 
@@ -170,6 +176,8 @@ function buildThreadItem(thread: KanbanLiveThread, nowIso: string): KanbanBoardI
     lastMovedAt: nowIso,
     archivedAt: null,
     snapshot: normalizeLiveSnapshot(thread),
+    prTitle: null,
+    prUrl: null,
   }
 }
 
@@ -250,6 +258,9 @@ function updateBoardItem(state: KanbanBoardState, update: KanbanThreadUpdate): {
         ? Date.now()
         : existing?.lanePosition ?? Date.now()
 
+  const nextPrTitle = update.prTitle !== undefined ? (update.prTitle?.trim() || null) : (existing?.prTitle ?? null)
+  const nextPrUrl = update.prUrl !== undefined ? (update.prUrl?.trim() || null) : (existing?.prUrl ?? null)
+
   const nextItem: KanbanBoardItem = {
     threadId: normalizedThreadId,
     board: nextBoard,
@@ -263,6 +274,8 @@ function updateBoardItem(state: KanbanBoardState, update: KanbanThreadUpdate): {
         : (existing?.lastMovedAt ?? nowIso),
     archivedAt: nextStatus === 'archived' ? nowIso : null,
     snapshot,
+    prTitle: nextPrTitle,
+    prUrl: nextPrUrl,
   }
 
   const changed =
@@ -272,6 +285,8 @@ function updateBoardItem(state: KanbanBoardState, update: KanbanThreadUpdate): {
     existing.lanePosition !== nextItem.lanePosition ||
     existing.archivedAt !== nextItem.archivedAt ||
     existing.lastMovedAt !== nextItem.lastMovedAt ||
+    existing.prTitle !== nextItem.prTitle ||
+    existing.prUrl !== nextItem.prUrl ||
     !snapshotsEqual(existing.snapshot, nextItem.snapshot)
 
   if (!changed) {

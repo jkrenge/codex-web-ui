@@ -76,6 +76,8 @@ export type UiThread = {
   kanbanBoard: KanbanBoard
   kanbanStatus: KanbanStatus
   kanbanPosition: number
+  prTitle: string | null
+  prUrl: string | null
 }
 
 export type CommandExecutionData = {

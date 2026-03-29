@@ -79,6 +79,8 @@ export type KanbanBoardItem = {
   lastMovedAt: string
   archivedAt: string | null
   snapshot: KanbanBoardSnapshot
+  prTitle: string | null
+  prUrl: string | null
 }
 
 export type KanbanBoardState = {
@@ -698,6 +700,8 @@ function normalizeKanbanBoardItem(value: unknown): KanbanBoardItem | null {
       ? record.archivedAt
       : null,
     snapshot: normalizeKanbanBoardSnapshot(record.snapshot),
+    prTitle: typeof record.prTitle === 'string' && record.prTitle.trim().length > 0 ? record.prTitle.trim() : null,
+    prUrl: typeof record.prUrl === 'string' && record.prUrl.trim().length > 0 ? record.prUrl.trim() : null,
   }
 }
 
@@ -743,9 +747,11 @@ export async function setThreadKanbanStatus(
   threadId: string,
   payload: {
     board?: KanbanBoard
-    status: KanbanStatus
+    status?: KanbanStatus
     lanePosition?: number
     snapshot?: Partial<KanbanBoardSnapshot>
+    prTitle?: string | null
+    prUrl?: string | null
   },
 ): Promise<KanbanBoardItem> {
   const normalizedThreadId = threadId.trim()

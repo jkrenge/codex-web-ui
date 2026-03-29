@@ -1728,6 +1728,8 @@ onBeforeUnmount(() => {
 
 .message-text {
   @apply m-0 text-sm leading-relaxed whitespace-pre-wrap text-slate-800;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .message-bold-text {

@@ -122,9 +122,7 @@
         class="kanban-board-section"
         :data-board="board.board"
       >
-        <header v-if="board.label" class="kanban-board-section-header">
-          <span class="kanban-board-section-title">{{ board.label }}</span>
-        </header>
+        <hr v-if="board.label" class="kanban-board-section-divider" />
 
         <div class="kanban-board">
           <article
@@ -170,28 +168,29 @@
                         :data-state="getThreadState(thread)"
                       />
                       <span class="thread-row-title">{{ getThreadDisplayTitle(thread) }}</span>
-                      <IconTablerGitFork v-if="thread.hasWorktree" class="thread-row-worktree-icon" title="Worktree thread" />
                       <span class="kanban-thread-time">{{ formatRelativeThread(thread) }}</span>
                     </span>
                     <span class="kanban-thread-meta-row">
                       <span class="kanban-thread-project">{{ getProjectDisplayName(thread.projectName) }}</span>
                       <IconClaude v-if="thread.backend === 'claude'" class="thread-backend-icon" />
                       <IconCodex v-else class="thread-backend-icon" />
-                      <span v-if="getThreadBadgeLabel(thread)" class="kanban-thread-badge">
+                      <span v-if="getThreadBadgeLabel(thread)" class="kanban-thread-badge" :data-marker="getThreadBadgeMarker(thread)">
                         {{ getThreadBadgeLabel(thread) }}
                       </span>
                     </span>
+                    <a
+                      v-if="thread.prTitle"
+                      class="kanban-thread-pr-link"
+                      :href="thread.prUrl || undefined"
+                      :target="thread.prUrl ? '_blank' : undefined"
+                      :rel="thread.prUrl ? 'noopener noreferrer' : undefined"
+                      @click.stop
+                    >
+                      {{ thread.prTitle }}
+                    </a>
                   </button>
 
                   <div :ref="(el) => setThreadMenuWrapRef(thread.id, el)" class="thread-menu-wrap kanban-thread-menu-wrap">
-                    <button
-                      class="thread-menu-trigger kanban-thread-menu-trigger"
-                      type="button"
-                      title="thread_menu"
-                      @click.stop="toggleThreadMenu(thread.id)"
-                    >
-                      <IconTablerDots class="thread-icon" />
-                    </button>
                     <div v-if="isThreadMenuOpen(thread.id)" class="thread-menu-panel" @click.stop>
                       <button class="thread-menu-item" type="button" @click="onBrowseThreadFiles(thread.id)">
                         Browse files
@@ -1075,6 +1074,10 @@ function getThreadBadgeLabel(thread: UiThread): string {
   return getManagedThreadTitleInfo(thread.title).badgeLabel ?? ''
 }
 
+function getThreadBadgeMarker(thread: UiThread): string | null {
+  return getManagedThreadTitleInfo(thread.title).marker
+}
+
 function moveThreadToKanbanStatus(threadId: string, status: KanbanStatus, board?: KanbanBoard): void {
   emit('set-kanban-status', { threadId, status, board })
   closeThreadMenu()
@@ -1737,8 +1740,8 @@ onBeforeUnmount(() => {
   @apply flex items-center px-1;
 }
 
-.kanban-board-section-title {
-  @apply text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500;
+.kanban-board-section-divider {
+  @apply border-t border-zinc-200 my-2;
 }
 
 .kanban-board {
@@ -1772,11 +1775,11 @@ onBeforeUnmount(() => {
 }
 
 .kanban-lane-list {
-  @apply min-w-0 gap-2;
+  @apply min-w-0 gap-3;
 }
 
 .kanban-thread-row {
-  @apply relative min-w-0 rounded-[1.35rem] border border-zinc-200 bg-white px-4 py-3 cursor-grab transition;
+  @apply relative min-w-0 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 cursor-grab transition;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
@@ -1799,7 +1802,7 @@ onBeforeUnmount(() => {
 }
 
 .kanban-thread-main-button {
-  @apply flex w-full min-w-0 flex-col items-start gap-1.5 pr-6 text-left;
+  @apply flex w-full min-w-0 flex-col items-start gap-1.5 text-left;
 }
 
 .kanban-thread-title-row {
@@ -1811,7 +1814,7 @@ onBeforeUnmount(() => {
 }
 
 .kanban-thread-time {
-  @apply ml-auto shrink-0 pr-2 text-[0.95rem] font-normal text-zinc-500;
+  @apply ml-auto shrink-0 text-[0.65rem] font-normal text-zinc-400;
 }
 
 .kanban-thread-meta-row {
@@ -1823,11 +1826,26 @@ onBeforeUnmount(() => {
 }
 
 .kanban-thread-badge {
-  @apply inline-flex shrink-0 items-center rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600;
+  @apply inline-flex shrink-0 items-center rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-px text-[10px] font-medium normal-case tracking-normal text-zinc-600;
 }
 
-.kanban-thread-menu-wrap {
-  @apply absolute right-3 top-3;
+.kanban-thread-badge[data-marker='review'] {
+  @apply border-zinc-200 bg-zinc-100 text-zinc-500;
+}
+
+.kanban-thread-badge[data-marker='pending'] {
+  @apply border-blue-200 bg-blue-50 text-blue-600;
+}
+
+.kanban-thread-pr-link {
+  @apply block overflow-hidden whitespace-nowrap text-[10px] text-blue-500 hover:text-blue-700 transition-colors mt-0.5;
+  width: inherit;
+  mask-image: linear-gradient(to right, black calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 10px), transparent 100%);
+}
+
+.kanban-thread-row > .kanban-thread-menu-wrap {
+  @apply absolute right-1.5 top-1;
 }
 
 .kanban-thread-menu-trigger {
@@ -1993,7 +2011,7 @@ onBeforeUnmount(() => {
 }
 
 .thread-menu-panel {
-  @apply absolute right-0 top-full mt-1 z-20 min-w-36 rounded-md border border-zinc-200 bg-white p-1 shadow-md flex flex-col gap-0.5;
+  @apply absolute right-0 top-full mt-1 z-20 min-w-72 whitespace-nowrap rounded-md border border-zinc-200 bg-white p-1 shadow-md flex flex-col gap-0.5;
 }
 
 .thread-menu-item {
